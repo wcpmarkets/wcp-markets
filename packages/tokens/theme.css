@@ -1,0 +1,47 @@
+/**
+ * Tailwind v4 theme — mirrors packages/tokens/src/index.ts.
+ * Import this after `@import "tailwindcss";` in an app's global stylesheet.
+ * Exposes `bg-canvas`, `text-muted`, `border-line`, etc. as utilities and the
+ * matching `--color-*` CSS variables.
+ */
+@theme {
+  --color-canvas: #0d0f14;
+  --color-canvas-alt: #0b0d11;
+  --color-panel: #12151c;
+  --color-panel-deep-from: #141821;
+  --color-panel-deep-to: #0e1116;
+
+  --color-line: #232838;
+  --color-line-hover: #3a4254;
+  --color-divider: #161b25;
+
+  --color-ink: #eaedf2;
+  --color-ink-secondary: #c6ccd8;
+  --color-muted: #8a93a6;
+  --color-faint: #707a8c;
+
+  --color-brand-purple: #7c5cff;
+  --color-brand-cyan: #22d3ee;
+  --color-lime: #a3e635;
+
+  --color-lane-goods: #22d3ee;
+  --color-lane-property: #9ec3dc;
+  --color-lane-vehicles: #ffb020;
+  --color-lane-services: #a3e635;
+
+  --font-sans: "Space Grotesk", system-ui, sans-serif;
+
+  --radius-pill: 999px;
+  --radius-card-lg: 24px;
+  --radius-card: 18px;
+  --radius-input: 13px;
+}
+
+/* Named gradients + shadows as reusable custom properties. */
+:root {
+  --gradient-signature: linear-gradient(120deg, #7c5cff, #22d3ee);
+  --gradient-amount: linear-gradient(120deg, #eaedf2, #9ec3dc);
+  --gradient-panel-deep: linear-gradient(180deg, #141821, #0e1116);
+  --shadow-escrow: 0 40px 90px rgba(124, 92, 255, 0.18),
+    0 12px 30px rgba(0, 0, 0, 0.6);
+}

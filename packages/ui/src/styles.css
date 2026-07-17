@@ -1,0 +1,35 @@
+/**
+ * Reusable classes built on the token CSS variables (see @wcp/tokens/theme.css).
+ * Import once in an app's global stylesheet, after the tokens theme.
+ */
+
+.wcp-gradient {
+  background-image: var(--gradient-signature);
+}
+.wcp-gradient-hover:hover {
+  filter: brightness(1.1);
+}
+.wcp-gradient-hover-soft:hover {
+  filter: brightness(1.08);
+}
+
+/* Gradient-painted text (headline accent, escrow amount). */
+.wcp-gradient-text {
+  background-image: var(--gradient-signature);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.wcp-amount-text {
+  background-image: var(--gradient-amount);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.wcp-panel-deep {
+  background-image: var(--gradient-panel-deep);
+}
+.wcp-escrow-shadow {
+  box-shadow: var(--shadow-escrow);
+}
