@@ -23,7 +23,9 @@ export function EmailCapture({
     <div className={cn(align === "center" && "mx-auto max-w-[480px]")}>
       <form
         className={cn(
-          "flex max-w-[480px] gap-2.5",
+          // Stack input above button on mobile so the field is full-width and
+          // readable; side-by-side from `sm` up.
+          "flex max-w-[480px] flex-col gap-2.5 sm:flex-row",
           align === "center" && "mx-auto",
         )}
         onSubmit={(e) => {
@@ -53,7 +55,12 @@ export function EmailCapture({
               : "border-line placeholder:text-faint",
           )}
         />
-        <GradientButton type="submit" size="lg" disabled={submitting}>
+        <GradientButton
+          type="submit"
+          size="lg"
+          disabled={submitting}
+          className="w-full sm:w-auto"
+        >
           {submitting ? "Joining…" : "Join the waitlist"}
         </GradientButton>
       </form>
