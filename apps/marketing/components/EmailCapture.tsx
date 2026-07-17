@@ -45,7 +45,9 @@ export function EmailCapture({
           aria-label="Email address"
           aria-invalid={error ? true : undefined}
           className={cn(
-            "w-full min-w-0 flex-1 rounded-[13px] border bg-panel px-[18px] py-[15px] text-[14px] text-ink outline-none focus:border-line-hover",
+            // 16px on mobile prevents iOS Safari from auto-zooming (and shifting
+            // the layout) on focus; step down to the design's 14px on desktop.
+            "w-full min-w-0 flex-1 rounded-[13px] border bg-panel px-[18px] py-[15px] text-[16px] text-ink outline-none focus:border-line-hover md:text-[14px]",
             error
               ? "border-[#FF8886] placeholder:text-[#FF8886]"
               : "border-line placeholder:text-faint",

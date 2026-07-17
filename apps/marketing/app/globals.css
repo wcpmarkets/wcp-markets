@@ -28,6 +28,9 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    /* Never allow sideways scroll from decorative overflow (e.g. the hero
+       escrow-card glow that bleeds past its edges). */
+    overflow-x: hidden;
   }
 
   a {

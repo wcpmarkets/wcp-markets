@@ -190,7 +190,7 @@ export const waitlistNotes = {
 } as const;
 
 export const footer = {
-  copyright: "© 2026 WCP Markets · Lagos, Nigeria",
+  copyright: "© 2026 WCP Markets · Bayelsa, Nigeria",
   links: [
     { label: "Terms", href: "#" },
     { label: "Privacy", href: "#" },

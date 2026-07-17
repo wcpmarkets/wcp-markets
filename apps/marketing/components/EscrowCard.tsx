@@ -39,7 +39,7 @@ export function EscrowCard() {
   const steps = released ? RELEASED_STEPS : IDLE_STEPS;
 
   return (
-    <div className="relative w-[342px]">
+    <div className="relative mx-auto w-full max-w-[342px]">
       {/* Soft glow behind the card */}
       <div
         className="pointer-events-none absolute -inset-y-8 -inset-x-[22px] blur-[8px]"
