@@ -8,7 +8,9 @@ function makeClient(): PostHog {
     // are not lost when the invocation ends.
     flushAt: 1,
     flushInterval: 0,
-    enableExceptionAutocapture: true,
+    // Off: this is a per-request client; exception autocapture would register
+    // process-level handlers on every invocation.
+    enableExceptionAutocapture: false,
   });
 }
 

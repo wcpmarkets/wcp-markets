@@ -21,32 +21,41 @@ export async function joinWaitlist(input: {
     return { ok: false, error: "invalid_email" };
   }
 
-  const posthog = getPostHogClient();
   const result = await saveWaitlistEntry({ email, intent: input.intent ?? null });
 
-  try {
-    if (result.ok) {
-      posthog.capture({
-        distinctId: email,
-        event: "waitlist joined",
-        properties: {
-          intent: input.intent ?? null,
-          duplicate: result.duplicate,
-          $set: { email },
-        },
-      });
-    } else {
-      posthog.capture({
-        distinctId: email,
-        event: "waitlist join failed",
-        properties: {
-          intent: input.intent ?? null,
-          error: result.error,
-        },
-      });
+  // Reliable server-side conversion event (survives client-side ad-blockers).
+  // Analytics must NEVER break the join, so this is fully best-effort: guarded
+  // on the key, and any capture/flush error is swallowed.
+  if (process.env.NEXT_PUBLIC_POSTHOG_KEY) {
+    try {
+      const posthog = getPostHogClient();
+      try {
+        posthog.capture(
+          result.ok
+            ? {
+                distinctId: email,
+                event: "waitlist_joined",
+                properties: {
+                  intent: input.intent ?? null,
+                  duplicate: result.duplicate,
+                  $set: { email },
+                },
+              }
+            : {
+                distinctId: email,
+                event: "waitlist_join_failed",
+                properties: {
+                  intent: input.intent ?? null,
+                  error: result.error,
+                },
+              },
+        );
+      } finally {
+        await posthog.shutdown();
+      }
+    } catch {
+      // ignore analytics failures
     }
-  } finally {
-    await posthog.shutdown();
   }
 
   return result;
