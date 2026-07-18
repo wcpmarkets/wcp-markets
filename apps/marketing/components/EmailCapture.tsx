@@ -8,7 +8,8 @@ import { waitlistNotes } from "@/lib/content";
  * Shared email-capture row (F-1) used in the hero and the waitlist section.
  * Both instances read the same context, so submitting in one converts both.
  * Clicking "Join the waitlist" validates the email, then opens the intent
- * dialog (see WaitlistDialog). `align="center"` centers the row.
+ * dialog (see WaitlistDialog). Once joined, the form is replaced by a success
+ * chip (same in both places). `align="center"` centers the row.
  */
 export function EmailCapture({
   source,
@@ -19,6 +20,20 @@ export function EmailCapture({
 }) {
   const { email, setEmail, joined, error, clearError, requestJoin } =
     useWaitlist();
+
+  // After joining, both the hero and the waitlist section show the same chip.
+  if (joined) {
+    return (
+      <div className={cn(align === "center" && "text-center")}>
+        <div className="inline-flex items-center gap-2.5 rounded-[14px] border border-brand-cyan bg-panel px-[26px] py-4 text-[14.5px] text-ink">
+          <span className="text-[16px] text-brand-cyan" aria-hidden="true">
+            ✓
+          </span>
+          {waitlistNotes.successChip}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn(align === "center" && "mx-auto max-w-[480px]")}>
@@ -74,9 +89,7 @@ export function EmailCapture({
       )}
 
       {source === "hero" && (
-        <p className="mt-3 text-[12px] text-faint">
-          {joined ? waitlistNotes.joinedHero : waitlistNotes.notJoined}
-        </p>
+        <p className="mt-3 text-[12px] text-faint">{waitlistNotes.notJoined}</p>
       )}
     </div>
   );

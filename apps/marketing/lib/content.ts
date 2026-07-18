@@ -19,7 +19,7 @@ export const nav = {
 } as const;
 
 export const hero = {
-  statusPill: "Built for Nigeria · launching soon",
+  statusPill: "Trust & Opportunities · launching soon",
   headingLine1: "Buy and sell anything.",
   headingLine2: "Money held safe.",
   sub: "WCP Markets is a marketplace for goods, property, vehicles and services — where every naira sits in escrow until you confirm the deal. Describe what you want in plain English; the AI finds it. No pay-and-pray.",
@@ -183,10 +183,10 @@ export const waitlistSection = {
 } as const;
 
 export const waitlistNotes = {
-  notJoined: "Join 12,400+ Nigerians already waiting.",
-  joinedHero: "✓ You’re on the list — check your inbox for a confirmation.",
-  successChip:
-    "You’re on the list — we’ll email you the moment doors open.",
+  notJoined: "Join others already waiting.",
+  // Shown (with a ✓) in both the hero and waitlist section after joining. Only
+  // promises an email at launch — we don't send confirmation emails yet.
+  successChip: "You’re on the list — we’ll email you the moment doors open.",
 } as const;
 
 export const footer = {

@@ -5,6 +5,12 @@ import { flags } from "@/lib/flags";
 
 /** Hero: promise headline + email capture on the left, escrow card on the right. */
 export function Hero() {
+  // Split the status pill so it can middle-truncate: the start truncates with an
+  // ellipsis while the last word stays pinned, e.g. "Trust & Opp…soon".
+  const pillWords = hero.statusPill.trim().split(" ");
+  const pillEnd = pillWords.at(-1) ?? "";
+  const pillStart = pillWords.slice(0, -1).join(" ");
+
   return (
     <header
       id="top"
@@ -12,9 +18,14 @@ export function Hero() {
     >
       {/* Left column */}
       <div className="min-w-[min(420px,100%)] flex-[1.2]">
-        <div className="inline-flex items-center gap-2 rounded-[999px] border border-line bg-panel px-[14px] py-[7px] text-[12px] text-muted">
-          <span className="inline-block h-[7px] w-[7px] rounded-full bg-lime" />
-          {hero.statusPill}
+        <div className="inline-flex max-w-full items-center gap-2 rounded-[999px] border border-line bg-panel px-[14px] py-[7px] text-[12px] text-muted">
+          <span className="inline-block h-[7px] w-[7px] shrink-0 rounded-full bg-lime" />
+          <span className="flex min-w-0">
+            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+              {pillStart}
+            </span>
+            <span className="shrink-0 whitespace-nowrap">{` ${pillEnd}`}</span>
+          </span>
         </div>
 
         <h1 className="mt-[22px] text-[40px] font-bold leading-[1.06] tracking-[-2px] min-[560px]:text-[58px]">
