@@ -8,7 +8,7 @@ export function LanesSection() {
       <div className="mx-auto max-w-[1140px] px-8 py-[72px]">
         <Eyebrow>ONE APP · FOUR LANES</Eyebrow>
         <h2 className="mt-3 text-[34px] font-bold tracking-[-1px]">
-          Everything a classifieds site lists.
+          Everything in one marketplace.
           <br />
           With the deal closed safely in-app.
         </h2>
