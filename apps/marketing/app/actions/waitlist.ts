@@ -1,6 +1,7 @@
 "use server";
 
 import { saveWaitlistEntry, type WaitlistIntent } from "@/lib/waitlist";
+import { getPostHogClient } from "@/lib/posthog";
 
 export type JoinResult =
   | { ok: true; duplicate: boolean }
@@ -19,5 +20,34 @@ export async function joinWaitlist(input: {
   if (!email.includes("@")) {
     return { ok: false, error: "invalid_email" };
   }
-  return saveWaitlistEntry({ email, intent: input.intent ?? null });
+
+  const posthog = getPostHogClient();
+  const result = await saveWaitlistEntry({ email, intent: input.intent ?? null });
+
+  try {
+    if (result.ok) {
+      posthog.capture({
+        distinctId: email,
+        event: "waitlist joined",
+        properties: {
+          intent: input.intent ?? null,
+          duplicate: result.duplicate,
+          $set: { email },
+        },
+      });
+    } else {
+      posthog.capture({
+        distinctId: email,
+        event: "waitlist join failed",
+        properties: {
+          intent: input.intent ?? null,
+          error: result.error,
+        },
+      });
+    }
+  } finally {
+    await posthog.shutdown();
+  }
+
+  return result;
 }

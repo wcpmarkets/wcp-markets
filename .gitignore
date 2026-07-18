@@ -34,3 +34,4 @@ apps/*/data/
 
 # design references — kept out of version control (available locally only)
 design_handoff_marketing_site/
+.env.local
