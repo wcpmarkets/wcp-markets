@@ -81,14 +81,10 @@ export function EmailCapture({
         align={align}
       />
 
+      {/* Error is shown inline as the field's red placeholder; keep a
+          screen-reader-only announcement here for accessibility. */}
       {error && (
-        <p
-          className={cn(
-            "mt-3 text-[12px] text-[#FF8886]",
-            align === "center" && "text-center",
-          )}
-          role="alert"
-        >
+        <p className="sr-only" role="alert">
           {error}
         </p>
       )}
