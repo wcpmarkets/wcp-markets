@@ -25,6 +25,7 @@ export function EmailCapture({
     joined,
     submitting,
     error,
+    intentError,
     clearError,
     submit,
   } = useWaitlist();
@@ -79,6 +80,7 @@ export function EmailCapture({
         intent={intent}
         onChange={setIntent}
         align={align}
+        invalid={intentError}
       />
 
       {/* Error is shown inline as the field's red placeholder; keep a
@@ -98,15 +100,17 @@ export function EmailCapture({
   );
 }
 
-/** Optional buyer/seller intent (F-3). Single-select; tap again to clear. */
+/** Required buyer/seller intent (F-3). Single-select; tap again to clear. */
 function IntentSelect({
   intent,
   onChange,
   align,
+  invalid,
 }: {
   intent: WaitlistIntent;
   onChange: (value: WaitlistIntent) => void;
   align: "start" | "center";
+  invalid: boolean;
 }) {
   const options: { value: Exclude<WaitlistIntent, null>; label: string }[] = [
     { value: "buy", label: "Buy" },
@@ -120,7 +124,9 @@ function IntentSelect({
         align === "center" && "justify-center",
       )}
     >
-      <span className="text-[12px] text-faint">I want to</span>
+      <span className={cn("text-[12px]", invalid ? "text-[#FF8886]" : "text-faint")}>
+        {invalid ? "Pick one to continue:" : "I want to"}
+      </span>
       {options.map((opt) => {
         const active = intent === opt.value;
         return (
@@ -133,7 +139,9 @@ function IntentSelect({
               "rounded-[999px] border px-[13px] py-[5px] text-[12px] transition-colors",
               active
                 ? "border-brand-cyan text-brand-cyan"
-                : "border-line text-muted hover:border-line-hover",
+                : invalid
+                  ? "border-[#FF8886] text-ink-secondary"
+                  : "border-line text-muted hover:border-line-hover",
             )}
           >
             {opt.label}

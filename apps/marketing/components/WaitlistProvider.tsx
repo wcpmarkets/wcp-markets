@@ -25,6 +25,7 @@ type WaitlistContextValue = {
   joined: boolean;
   submitting: boolean;
   error: string | null;
+  intentError: boolean;
   clearError: () => void;
   submit: (source: "hero" | "waitlist") => Promise<void>;
 };
@@ -33,10 +34,17 @@ const WaitlistContext = createContext<WaitlistContextValue | null>(null);
 
 export function WaitlistProvider({ children }: { children: ReactNode }) {
   const [email, setEmail] = useState("");
-  const [intent, setIntent] = useState<WaitlistIntent>(null);
+  const [intent, setIntentState] = useState<WaitlistIntent>(null);
   const [joined, setJoined] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [intentError, setIntentError] = useState(false);
+
+  // Selecting an intent clears the "please choose one" prompt.
+  const setIntent = useCallback((value: WaitlistIntent) => {
+    setIntentState(value);
+    if (value) setIntentError(false);
+  }, []);
 
   const submit = useCallback(
     async (source: "hero" | "waitlist") => {
@@ -49,7 +57,13 @@ export function WaitlistProvider({ children }: { children: ReactNode }) {
         setEmail("");
         return;
       }
+      // Intent is required — prompt for a choice before submitting.
+      if (!intent) {
+        setIntentError(true);
+        return;
+      }
       setError(null);
+      setIntentError(false);
       setSubmitting(true);
       track("waitlist_submit", { source, intent });
       try {
@@ -86,10 +100,11 @@ export function WaitlistProvider({ children }: { children: ReactNode }) {
       joined,
       submitting,
       error,
+      intentError,
       clearError,
       submit,
     }),
-    [email, intent, joined, submitting, error, clearError, submit],
+    [email, intent, joined, submitting, error, intentError, clearError, submit],
   );
 
   return (
