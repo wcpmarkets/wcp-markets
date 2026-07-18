@@ -198,6 +198,11 @@ export const footer = {
       href: "https://x.com/wcpmarkets",
     },
     {
+      kind: "linkedin",
+      label: "WCP Markets on LinkedIn",
+      href: "https://www.linkedin.com/company/wcp-markets/",
+    },
+    {
       // Gmail compose URL (opens reliably in a new tab). A bare mailto: does
       // nothing when the device has no default mail app configured.
       kind: "email",
