@@ -31,8 +31,13 @@ export type SaveResult =
   | { ok: false; error: "storage_error" };
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
+// Prefer the new-style secret API key (`sb_secret_...`), which bypasses RLS the
+// same way the legacy `service_role` key did. Fall back to the legacy keys so
+// older projects keep working. Server-side only — never expose to the browser.
 const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY;
+  process.env.SUPABASE_SECRET_KEY ??
+  process.env.SUPABASE_SERVICE_ROLE_KEY ??
+  process.env.SUPABASE_ANON_KEY;
 
 export async function saveWaitlistEntry(
   entry: WaitlistEntry,

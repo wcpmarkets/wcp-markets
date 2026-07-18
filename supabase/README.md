@@ -13,13 +13,16 @@ Backend core for the platform. In **Phase 1** it stores only the marketing-site
    the contents of [`migrations/0001_waitlist.sql`](./migrations/0001_waitlist.sql)
    and click **Run**. (Or use the Supabase CLI: `supabase db push`.)
 
-3. **Grab the credentials.** Dashboard → **Project Settings → API**:
-   - **Project URL** → `SUPABASE_URL`
-   - **`service_role` secret key** (under *Project API keys*) →
-     `SUPABASE_SERVICE_ROLE_KEY`
-     ⚠️ This key bypasses RLS. It is used **server-side only** (the waitlist
-     server action imports `server-only`). **Never** prefix it with
-     `NEXT_PUBLIC_` and never expose it to the browser.
+3. **Grab the credentials.** Dashboard → **Project Settings → API Keys**:
+   - **Project URL** (Settings → API) → `SUPABASE_URL`
+   - A **secret API key** (`sb_secret_...`) → `SUPABASE_SECRET_KEY`
+     Use a *standard* secret key (full access) — it bypasses RLS, which the
+     server action needs. A **restricted** secret key may not bypass RLS and the
+     insert would fail.
+     ⚠️ Server-side only (the waitlist action imports `server-only`). **Never**
+     prefix it with `NEXT_PUBLIC_` and never expose it to the browser.
+   - Older projects only: the legacy `service_role` key still works via
+     `SUPABASE_SERVICE_ROLE_KEY` (the code falls back to it).
 
 ## Where the keys go
 
@@ -27,14 +30,14 @@ Backend core for the platform. In **Phase 1** it stores only the marketing-site
 
   ```
   SUPABASE_URL=https://<your-project-ref>.supabase.co
-  SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
+  SUPABASE_SECRET_KEY=sb_secret_...
   ```
 
   Restart `pnpm dev`. The waitlist now writes to Postgres instead of the local
   `data/waitlist.json` fallback.
 
 - **Vercel:** Project → **Settings → Environment Variables** → add the same two
-  (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) for **Production** (and Preview),
+  (`SUPABASE_URL`, `SUPABASE_SECRET_KEY`) for **Production** (and Preview),
   then redeploy.
 
 ## How it's wired
