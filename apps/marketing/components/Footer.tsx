@@ -5,13 +5,13 @@ export function Footer() {
   return (
     <footer className="border-t border-divider bg-canvas-alt">
       <div className="mx-auto flex max-w-[1140px] flex-col items-center gap-4 px-8 py-9 text-center sm:flex-row sm:gap-6 sm:text-left">
-        <div className="flex items-center gap-[3px]">
+        <div className="flex items-center gap-2">
           <Image
-            src="/wcp-logo.png"
+            src="/wcp-logomark.png"
             alt=""
-            width={24}
-            height={24}
-            className="h-6 w-6 shrink-0 object-contain"
+            width={1306}
+            height={1439}
+            className="h-6 w-auto shrink-0 object-contain"
           />
           <span className="text-[15px] font-bold">WCP Markets</span>
         </div>

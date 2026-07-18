@@ -156,7 +156,7 @@ export const trust = [
 export const faqs = [
   {
     q: "What is WCP Markets?",
-    a: "WCP Markets is a Nigerian marketplace for goods, property, vehicles and services. It works like the classifieds you know — anyone can list anything — but the deal closes safely inside the app: your payment is held in escrow by WCP Markets and only released to the seller when you confirm.",
+    a: "WCP Markets is a Nigerian marketplace for goods, property, vehicles and services. Anyone can list anything — but the deal closes safely inside the app: your payment is held in escrow by WCP Markets and only released to the seller when you confirm.",
   },
   {
     q: "How is buying on WCP Markets safer?",

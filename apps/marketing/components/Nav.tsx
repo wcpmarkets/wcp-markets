@@ -23,15 +23,15 @@ export function Nav() {
       <a
         href="#top"
         onClick={() => setOpen(false)}
-        className="flex shrink-0 items-center gap-[3px]"
+        className="flex shrink-0 items-center gap-2"
         aria-label="WCP Markets — home"
       >
         <Image
-          src="/wcp-logo.png"
+          src="/wcp-logomark.png"
           alt=""
-          width={30}
-          height={30}
-          className="h-[30px] w-[30px] shrink-0 object-contain"
+          width={1306}
+          height={1439}
+          className="h-7 w-auto shrink-0 object-contain"
           priority
         />
         <span className="whitespace-nowrap text-[18px] font-bold tracking-[-0.3px] text-ink">

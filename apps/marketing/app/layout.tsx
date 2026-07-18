@@ -18,7 +18,6 @@ export const metadata: Metadata = {
     "WCP Markets",
     "Nigeria marketplace",
     "escrow",
-    "classifieds",
     "buy and sell",
   ],
   openGraph: {
