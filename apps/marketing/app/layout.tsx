@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Space_Grotesk } from "next/font/google";
+import { AnalyticsProvider } from "@/components/AnalyticsProvider";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -43,7 +44,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={spaceGrotesk.variable}>
-      <body>{children}</body>
+      <body>
+        <AnalyticsProvider />
+        {children}
+      </body>
     </html>
   );
 }

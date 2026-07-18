@@ -3,4 +3,5 @@ packages:
   - "packages/*"
   - "services/*"
 allowBuilds:
+  core-js: false
   sharp: true
