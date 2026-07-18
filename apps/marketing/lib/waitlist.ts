@@ -19,7 +19,7 @@ import path from "node:path";
  *   );
  */
 
-export type WaitlistIntent = "buy" | "sell" | null;
+export type WaitlistIntent = "buy" | "sell" | "both" | null;
 
 export type WaitlistEntry = {
   email: string;

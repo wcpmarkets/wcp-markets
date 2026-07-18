@@ -9,9 +9,11 @@ Backend core for the platform. In **Phase 1** it stores only the marketing-site
    *New project*. Pick a region close to Nigeria (e.g. `West EU (London)` or
    `East US` — Supabase has no African region yet). Save the database password.
 
-2. **Create the table.** In the dashboard → **SQL Editor** → *New query*, paste
-   the contents of [`migrations/0001_waitlist.sql`](./migrations/0001_waitlist.sql)
-   and click **Run**. (Or use the Supabase CLI: `supabase db push`.)
+2. **Create the table.** In the dashboard → **SQL Editor** → *New query*, run
+   each file in [`migrations/`](./migrations) **in order** (`0001…`, then
+   `0002…`). (Or use the Supabase CLI: `supabase db push`.) If you already ran
+   `0001`, just run the newer ones to catch up (e.g. `0002` adds the `'both'`
+   intent).
 
 3. **Grab the credentials.** Dashboard → **Project Settings → API Keys**:
    - **Project URL** (Settings → API) → `SUPABASE_URL`

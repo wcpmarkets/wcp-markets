@@ -3,6 +3,7 @@
 import { GradientButton, cn } from "@wcp/ui";
 import { useWaitlist } from "./WaitlistProvider";
 import { waitlistNotes } from "@/lib/content";
+import type { WaitlistIntent } from "@/lib/waitlist";
 
 /**
  * Shared email-capture row (F-1) used in the hero and the waitlist section.
@@ -16,8 +17,17 @@ export function EmailCapture({
   source: "hero" | "waitlist";
   align?: "start" | "center";
 }) {
-  const { email, setEmail, joined, submitting, error, clearError, submit } =
-    useWaitlist();
+  const {
+    email,
+    setEmail,
+    intent,
+    setIntent,
+    joined,
+    submitting,
+    error,
+    clearError,
+    submit,
+  } = useWaitlist();
 
   return (
     <div className={cn(align === "center" && "mx-auto max-w-[480px]")}>
@@ -65,11 +75,75 @@ export function EmailCapture({
         </GradientButton>
       </form>
 
-      {source === "hero" && (
+      <IntentSelect
+        intent={intent}
+        onChange={setIntent}
+        align={align}
+      />
+
+      {error && (
+        <p
+          className={cn(
+            "mt-3 text-[12px] text-[#FF8886]",
+            align === "center" && "text-center",
+          )}
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
+
+      {source === "hero" && !error && (
         <p className="mt-3 text-[12px] text-faint">
           {joined ? waitlistNotes.joinedHero : waitlistNotes.notJoined}
         </p>
       )}
+    </div>
+  );
+}
+
+/** Optional buyer/seller intent (F-3). Single-select; tap again to clear. */
+function IntentSelect({
+  intent,
+  onChange,
+  align,
+}: {
+  intent: WaitlistIntent;
+  onChange: (value: WaitlistIntent) => void;
+  align: "start" | "center";
+}) {
+  const options: { value: Exclude<WaitlistIntent, null>; label: string }[] = [
+    { value: "buy", label: "Buy" },
+    { value: "sell", label: "Sell" },
+    { value: "both", label: "Both" },
+  ];
+  return (
+    <div
+      className={cn(
+        "mt-3 flex flex-wrap items-center gap-2",
+        align === "center" && "justify-center",
+      )}
+    >
+      <span className="text-[12px] text-faint">I want to</span>
+      {options.map((opt) => {
+        const active = intent === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(active ? null : opt.value)}
+            className={cn(
+              "rounded-[999px] border px-[13px] py-[5px] text-[12px] transition-colors",
+              active
+                ? "border-brand-cyan text-brand-cyan"
+                : "border-line text-muted hover:border-line-hover",
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
