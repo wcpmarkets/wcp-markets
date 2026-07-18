@@ -191,9 +191,18 @@ export const waitlistNotes = {
 
 export const footer = {
   copyright: "© 2026 WCP Markets · Bayelsa, Nigeria",
-  links: [
-    { label: "Terms", href: "#" },
-    { label: "Privacy", href: "#" },
-    { label: "Contact", href: "#" },
+  socials: [
+    {
+      kind: "x",
+      label: "WCP Markets on X",
+      href: "https://x.com/wcpmarkets",
+    },
+    {
+      // Gmail compose URL (opens reliably in a new tab). A bare mailto: does
+      // nothing when the device has no default mail app configured.
+      kind: "email",
+      label: "Email WCP Markets",
+      href: "https://mail.google.com/mail/?view=cm&fs=1&to=wcpmarketsng@gmail.com",
+    },
   ],
 } as const;

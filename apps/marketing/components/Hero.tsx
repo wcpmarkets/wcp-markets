@@ -33,7 +33,9 @@ export function Hero() {
           </div>
         )}
 
-        <div className="mt-[34px] flex flex-wrap gap-[22px]">
+        {/* Center the trust chips while the hero is stacked (single column);
+            left-align once it becomes two columns (~864px). */}
+        <div className="mt-[34px] flex flex-wrap justify-center gap-[22px] min-[864px]:justify-start">
           {hero.chips.map((chip) => (
             <div
               key={chip.label}

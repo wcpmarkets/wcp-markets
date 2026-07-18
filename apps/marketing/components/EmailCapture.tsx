@@ -73,7 +73,7 @@ export function EmailCapture({
         </p>
       )}
 
-      {source === "hero" && !error && (
+      {source === "hero" && (
         <p className="mt-3 text-[12px] text-faint">
           {joined ? waitlistNotes.joinedHero : waitlistNotes.notJoined}
         </p>
