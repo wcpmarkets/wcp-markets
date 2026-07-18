@@ -3,12 +3,12 @@
 import { GradientButton, cn } from "@wcp/ui";
 import { useWaitlist } from "./WaitlistProvider";
 import { waitlistNotes } from "@/lib/content";
-import type { WaitlistIntent } from "@/lib/waitlist";
 
 /**
  * Shared email-capture row (F-1) used in the hero and the waitlist section.
  * Both instances read the same context, so submitting in one converts both.
- * `align="center"` centers the row (waitlist variant).
+ * Clicking "Join the waitlist" validates the email, then opens the intent
+ * dialog (see WaitlistDialog). `align="center"` centers the row.
  */
 export function EmailCapture({
   source,
@@ -17,18 +17,8 @@ export function EmailCapture({
   source: "hero" | "waitlist";
   align?: "start" | "center";
 }) {
-  const {
-    email,
-    setEmail,
-    intent,
-    setIntent,
-    joined,
-    submitting,
-    error,
-    intentError,
-    clearError,
-    submit,
-  } = useWaitlist();
+  const { email, setEmail, joined, error, clearError, requestJoin } =
+    useWaitlist();
 
   return (
     <div className={cn(align === "center" && "mx-auto max-w-[480px]")}>
@@ -41,7 +31,7 @@ export function EmailCapture({
         )}
         onSubmit={(e) => {
           e.preventDefault();
-          void submit(source);
+          requestJoin(source);
         }}
         noValidate
       >
@@ -69,19 +59,11 @@ export function EmailCapture({
         <GradientButton
           type="submit"
           size="lg"
-          disabled={submitting}
           className="w-full sm:w-auto"
         >
-          {submitting ? "Joining…" : "Join the waitlist"}
+          Join the waitlist
         </GradientButton>
       </form>
-
-      <IntentSelect
-        intent={intent}
-        onChange={setIntent}
-        align={align}
-        invalid={intentError}
-      />
 
       {/* Error is shown inline as the field's red placeholder; keep a
           screen-reader-only announcement here for accessibility. */}
@@ -96,58 +78,6 @@ export function EmailCapture({
           {joined ? waitlistNotes.joinedHero : waitlistNotes.notJoined}
         </p>
       )}
-    </div>
-  );
-}
-
-/** Required buyer/seller intent (F-3). Single-select; tap again to clear. */
-function IntentSelect({
-  intent,
-  onChange,
-  align,
-  invalid,
-}: {
-  intent: WaitlistIntent;
-  onChange: (value: WaitlistIntent) => void;
-  align: "start" | "center";
-  invalid: boolean;
-}) {
-  const options: { value: Exclude<WaitlistIntent, null>; label: string }[] = [
-    { value: "buy", label: "Buy" },
-    { value: "sell", label: "Sell" },
-    { value: "both", label: "Both" },
-  ];
-  return (
-    <div
-      className={cn(
-        "mt-3 flex flex-wrap items-center gap-2",
-        align === "center" && "justify-center",
-      )}
-    >
-      <span className={cn("text-[12px]", invalid ? "text-[#FF8886]" : "text-faint")}>
-        {invalid ? "Pick one to continue:" : "I want to"}
-      </span>
-      {options.map((opt) => {
-        const active = intent === opt.value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(active ? null : opt.value)}
-            className={cn(
-              "rounded-[999px] border px-[13px] py-[5px] text-[12px] transition-colors",
-              active
-                ? "border-brand-cyan text-brand-cyan"
-                : invalid
-                  ? "border-[#FF8886] text-ink-secondary"
-                  : "border-line text-muted hover:border-line-hover",
-            )}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -16,95 +17,118 @@ import type { WaitlistIntent } from "@/lib/waitlist";
  * Shared waitlist state (F-1). One provider wraps the page so the hero and the
  * waitlist section read/write the same email + joined state — submitting in
  * either place flips both.
+ *
+ * Flow: `requestJoin` validates the email and opens the intent dialog;
+ * `confirmIntent` (from the dialog) sends the sign-up with the chosen intent.
  */
 type WaitlistContextValue = {
   email: string;
   setEmail: (value: string) => void;
-  intent: WaitlistIntent;
-  setIntent: (value: WaitlistIntent) => void;
   joined: boolean;
   submitting: boolean;
   error: string | null;
-  intentError: boolean;
   clearError: () => void;
-  submit: (source: "hero" | "waitlist") => Promise<void>;
+  dialogOpen: boolean;
+  submitError: string | null;
+  requestJoin: (source: "hero" | "waitlist") => void;
+  confirmIntent: (value: Exclude<WaitlistIntent, null>) => Promise<void>;
+  closeDialog: () => void;
 };
 
 const WaitlistContext = createContext<WaitlistContextValue | null>(null);
 
 export function WaitlistProvider({ children }: { children: ReactNode }) {
   const [email, setEmail] = useState("");
-  const [intent, setIntentState] = useState<WaitlistIntent>(null);
   const [joined, setJoined] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [intentError, setIntentError] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const sourceRef = useRef<"hero" | "waitlist">("hero");
 
-  // Selecting an intent clears the "please choose one" prompt.
-  const setIntent = useCallback((value: WaitlistIntent) => {
-    setIntentState(value);
-    if (value) setIntentError(false);
-  }, []);
+  const clearError = useCallback(() => setError(null), []);
 
-  const submit = useCallback(
-    async (source: "hero" | "waitlist") => {
+  // Step 1 — validate the email, then open the intent dialog.
+  const requestJoin = useCallback(
+    (source: "hero" | "waitlist") => {
       if (submitting || joined) return;
-      // Minimal validation, matching the prototype (accept if it contains "@").
-      // The error surfaces inline in the field (as a red placeholder), so clear
-      // the invalid value to make it visible.
+      // Minimal validation (accept if it contains "@"). The error surfaces inline
+      // in the field as a red placeholder, so clear the invalid value.
       if (!email.includes("@")) {
         setError("Enter a valid email address");
         setEmail("");
         return;
       }
-      // Intent is required — prompt for a choice before submitting.
-      if (!intent) {
-        setIntentError(true);
-        return;
-      }
       setError(null);
-      setIntentError(false);
+      setSubmitError(null);
+      sourceRef.current = source;
+      track("waitlist_submit", { source });
+      setDialogOpen(true);
+    },
+    [email, joined, submitting],
+  );
+
+  const closeDialog = useCallback(() => {
+    setDialogOpen(false);
+    setSubmitError(null);
+  }, []);
+
+  // Step 2 — the dialog picked an intent; send the sign-up.
+  const confirmIntent = useCallback(
+    async (value: Exclude<WaitlistIntent, null>) => {
+      if (submitting) return;
       setSubmitting(true);
-      track("waitlist_submit", { source, intent });
+      setSubmitError(null);
+      const source = sourceRef.current;
+      track("waitlist_intent", { source, intent: value });
       try {
-        const res = await joinWaitlist({ email, intent });
+        const res = await joinWaitlist({ email, intent: value });
         if (res.ok) {
           setJoined(true);
-          track("waitlist_success", { source, duplicate: res.duplicate, intent });
+          setDialogOpen(false);
+          track("waitlist_success", {
+            source,
+            intent: value,
+            duplicate: res.duplicate,
+          });
         } else {
-          setError(
-            res.error === "invalid_email"
-              ? "Enter a valid email address"
-              : "Something went wrong — try again",
-          );
-          setEmail("");
+          setSubmitError("Something went wrong — please try again");
         }
       } catch {
-        setError("Something went wrong — try again");
-        setEmail("");
+        setSubmitError("Something went wrong — please try again");
       } finally {
         setSubmitting(false);
       }
     },
-    [email, intent, joined, submitting],
+    [email, submitting],
   );
-
-  const clearError = useCallback(() => setError(null), []);
 
   const value = useMemo<WaitlistContextValue>(
     () => ({
       email,
       setEmail,
-      intent,
-      setIntent,
       joined,
       submitting,
       error,
-      intentError,
       clearError,
-      submit,
+      dialogOpen,
+      submitError,
+      requestJoin,
+      confirmIntent,
+      closeDialog,
     }),
-    [email, intent, joined, submitting, error, intentError, clearError, submit],
+    [
+      email,
+      joined,
+      submitting,
+      error,
+      clearError,
+      dialogOpen,
+      submitError,
+      requestJoin,
+      confirmIntent,
+      closeDialog,
+    ],
   );
 
   return (

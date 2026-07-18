@@ -7,6 +7,7 @@
 /** Canonical event names fired across the platform. Extend as needed. */
 export type AnalyticsEvent =
   | "waitlist_submit"
+  | "waitlist_intent"
   | "waitlist_success"
   | "section_view"
   | "faq_expand"

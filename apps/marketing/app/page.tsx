@@ -1,4 +1,5 @@
 import { WaitlistProvider } from "@/components/WaitlistProvider";
+import { WaitlistDialog } from "@/components/WaitlistDialog";
 import { SectionViewTracker } from "@/components/SectionViewTracker";
 import { AnnouncementBar } from "@/components/AnnouncementBar";
 import { Nav } from "@/components/Nav";
@@ -29,6 +30,7 @@ export default function Page() {
         <WaitlistSection />
       </main>
       <Footer />
+      <WaitlistDialog />
       <SectionViewTracker ids={TRACKED_SECTIONS} />
     </WaitlistProvider>
   );
