@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { fetchSsm } from "./secrets.js";
 
 /**
  * Lazy Postgres client for the Supabase database.
@@ -48,20 +49,4 @@ async function init(): Promise<postgres.Sql | null> {
     idle_timeout: 20,
     connect_timeout: 10,
   });
-}
-
-async function fetchSsm(name: string): Promise<string | undefined> {
-  try {
-    // Resolved from the Lambda runtime's bundled AWS SDK v3 (externalized in the
-    // build). Never called locally, where DATABASE_URL is set directly.
-    const { SSMClient, GetParameterCommand } = await import("@aws-sdk/client-ssm");
-    const ssm = new SSMClient({});
-    const res = await ssm.send(
-      new GetParameterCommand({ Name: name, WithDecryption: true }),
-    );
-    return res.Parameter?.Value;
-  } catch (e) {
-    console.error(`[db] failed to fetch DATABASE_URL from SSM (${name}):`, e);
-    return undefined;
-  }
 }

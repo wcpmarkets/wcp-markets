@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { auth, type AuthEnv } from "./middleware/auth.js";
 import { clientIp } from "./middleware/rate-limit.js";
 import { getDb } from "./db.js";
+import { registerListings } from "./routes/listings.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -165,6 +166,9 @@ export function createApp() {
       return c.json({ status: "sent" as const }, 202);
     },
   );
+
+  // ── Listings (M1 — Goods) ────────────────────────────────────────────────
+  registerListings(app);
 
   // Security scheme for the emitted spec.
   app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {

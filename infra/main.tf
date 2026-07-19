@@ -81,6 +81,9 @@ resource "aws_lambda_function" "api" {
       # connection string. The Lambda fetches + decrypts it at runtime — the
       # secret is never in this env config, TF state, or git.
       DATABASE_URL_SSM = "/wcp/api/database-url"
+      # Same pattern for the Supabase service key (used to mint signed Storage
+      # URLs for the private listing-images bucket).
+      SUPABASE_SECRET_KEY_SSM = "/wcp/api/supabase-secret-key"
     }
   }
 
