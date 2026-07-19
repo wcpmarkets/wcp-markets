@@ -49,7 +49,9 @@ export const TERMINAL_STATES = [
   "REFUNDED",
 ] as const satisfies readonly DealState[];
 
-export const ACTORS = ["BUYER", "SELLER", "SYSTEM"] as const;
+// ADMIN is distinct from SYSTEM so the audit log records WHICH human resolved a
+// dispute (SYSTEM = timers/webhooks; ADMIN = a person's decision). Also the authz gate.
+export const ACTORS = ["BUYER", "SELLER", "ADMIN", "SYSTEM"] as const;
 export type Actor = (typeof ACTORS)[number];
 
 export const DEAL_ACTIONS = [
@@ -57,7 +59,8 @@ export const DEAL_ACTIONS = [
   "counter",
   "accept",
   "decline",
-  "withdraw",
+  "withdraw", // buyer backs out
+  "cancel", // seller backs out of an ACCEPTED-but-unpaid deal (reneged; trust signal)
   "pay",
   "payment_confirmed",
   "payment_failed",
@@ -105,27 +108,31 @@ export const TRANSITIONS: readonly Transition[] = [
   { from: "COUNTERED_BY_BUYER", actor: "SYSTEM", action: "expire", to: "EXPIRED", milestone: "M3" },
 
   { from: "ACCEPTED", actor: "BUYER", action: "withdraw", to: "WITHDRAWN", milestone: "M3" },
+  { from: "ACCEPTED", actor: "SELLER", action: "cancel", to: "DECLINED", milestone: "M3" }, // seller reneges pre-payment
   { from: "ACCEPTED", actor: "SYSTEM", action: "expire", to: "EXPIRED", milestone: "M3" },
 
   // ── Payment (M4) ──────────────────────────────────────────────────────────
+  // NOTE: no expire on PAYMENT_PENDING — once funds are in flight, auto-expiring
+  // would strand a captured payment on a terminal deal. A stuck payment is a
+  // reconciliation/ops concern, not a timer.
   { from: "ACCEPTED", actor: "BUYER", action: "pay", to: "PAYMENT_PENDING", milestone: "M4" },
   { from: "PAYMENT_PENDING", actor: "SYSTEM", action: "payment_confirmed", to: "PAID_IN_ESCROW", milestone: "M4" },
   { from: "PAYMENT_PENDING", actor: "SYSTEM", action: "payment_failed", to: "ACCEPTED", milestone: "M4" },
   { from: "PAYMENT_PENDING", actor: "SYSTEM", action: "oversold", to: "REFUNDED", milestone: "M4" },
-  { from: "PAYMENT_PENDING", actor: "SYSTEM", action: "expire", to: "EXPIRED", milestone: "M4" },
 
   // ── Fulfilment (M5) ───────────────────────────────────────────────────────
   { from: "PAID_IN_ESCROW", actor: "SELLER", action: "hand_off", to: "HANDED_OFF", milestone: "M5" },
   { from: "PAID_IN_ESCROW", actor: "SELLER", action: "cancel_refund", to: "REFUNDED", milestone: "M5" },
+  { from: "PAID_IN_ESCROW", actor: "SYSTEM", action: "auto_refund", to: "REFUNDED", milestone: "M5" }, // hand-off SLA breach
   { from: "HANDED_OFF", actor: "BUYER", action: "confirm_receipt", to: "COMPLETED", milestone: "M5" },
   { from: "HANDED_OFF", actor: "SYSTEM", action: "auto_release", to: "COMPLETED", milestone: "M5" },
 
   // ── Disputes (M6) ─────────────────────────────────────────────────────────
   { from: "PAID_IN_ESCROW", actor: "BUYER", action: "dispute", to: "DISPUTED", milestone: "M6" },
   { from: "HANDED_OFF", actor: "BUYER", action: "dispute", to: "DISPUTED", milestone: "M6" },
-  { from: "DISPUTED", actor: "SYSTEM", action: "auto_refund", to: "REFUNDED", milestone: "M6" },
-  { from: "DISPUTED", actor: "SYSTEM", action: "resolve_release", to: "COMPLETED", milestone: "M6" },
-  { from: "DISPUTED", actor: "SYSTEM", action: "resolve_refund", to: "REFUNDED", milestone: "M6" },
+  { from: "DISPUTED", actor: "SYSTEM", action: "auto_refund", to: "REFUNDED", milestone: "M6" }, // 24h silence
+  { from: "DISPUTED", actor: "ADMIN", action: "resolve_release", to: "COMPLETED", milestone: "M6" },
+  { from: "DISPUTED", actor: "ADMIN", action: "resolve_refund", to: "REFUNDED", milestone: "M6" },
 ] as const;
 
 /**
@@ -138,7 +145,8 @@ export const DEADLINES: Partial<Record<DealState, { hours: number; action: DealA
   COUNTERED_BY_SELLER: { hours: 4, action: "expire" },
   COUNTERED_BY_BUYER: { hours: 4, action: "expire" },
   ACCEPTED: { hours: 4, action: "expire" }, // accepted-but-unpaid
-  PAYMENT_PENDING: { hours: 4, action: "expire" }, // stuck-payment safety (M4)
+  // No deadline on PAYMENT_PENDING by design (see the transitions note).
+  PAID_IN_ESCROW: { hours: 72, action: "auto_refund" }, // seller hand-off SLA (buyer protection)
   HANDED_OFF: { hours: 48, action: "auto_release" },
   DISPUTED: { hours: 24, action: "auto_refund" },
 };

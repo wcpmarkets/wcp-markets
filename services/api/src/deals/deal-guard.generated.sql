@@ -30,21 +30,22 @@ returns text language sql immutable as $$
     ('COUNTERED_BY_BUYER', 'BUYER', 'withdraw', 'WITHDRAWN'),
     ('COUNTERED_BY_BUYER', 'SYSTEM', 'expire', 'EXPIRED'),
     ('ACCEPTED', 'BUYER', 'withdraw', 'WITHDRAWN'),
+    ('ACCEPTED', 'SELLER', 'cancel', 'DECLINED'),
     ('ACCEPTED', 'SYSTEM', 'expire', 'EXPIRED'),
     ('ACCEPTED', 'BUYER', 'pay', 'PAYMENT_PENDING'),
     ('PAYMENT_PENDING', 'SYSTEM', 'payment_confirmed', 'PAID_IN_ESCROW'),
     ('PAYMENT_PENDING', 'SYSTEM', 'payment_failed', 'ACCEPTED'),
     ('PAYMENT_PENDING', 'SYSTEM', 'oversold', 'REFUNDED'),
-    ('PAYMENT_PENDING', 'SYSTEM', 'expire', 'EXPIRED'),
     ('PAID_IN_ESCROW', 'SELLER', 'hand_off', 'HANDED_OFF'),
     ('PAID_IN_ESCROW', 'SELLER', 'cancel_refund', 'REFUNDED'),
+    ('PAID_IN_ESCROW', 'SYSTEM', 'auto_refund', 'REFUNDED'),
     ('HANDED_OFF', 'BUYER', 'confirm_receipt', 'COMPLETED'),
     ('HANDED_OFF', 'SYSTEM', 'auto_release', 'COMPLETED'),
     ('PAID_IN_ESCROW', 'BUYER', 'dispute', 'DISPUTED'),
     ('HANDED_OFF', 'BUYER', 'dispute', 'DISPUTED'),
     ('DISPUTED', 'SYSTEM', 'auto_refund', 'REFUNDED'),
-    ('DISPUTED', 'SYSTEM', 'resolve_release', 'COMPLETED'),
-    ('DISPUTED', 'SYSTEM', 'resolve_refund', 'REFUNDED')
+    ('DISPUTED', 'ADMIN', 'resolve_release', 'COMPLETED'),
+    ('DISPUTED', 'ADMIN', 'resolve_refund', 'REFUNDED')
   ) as t(from_state, actor, action, to_state)
   where from_state = p_from and actor = p_actor and action = p_action;
 $$;
