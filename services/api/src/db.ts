@@ -48,5 +48,10 @@ async function init(): Promise<postgres.Sql | null> {
     max: 3, // small pool per warm Lambda
     idle_timeout: 20,
     connect_timeout: 10,
+    // IMPORTANT: the deal command handler's correctness (createOffer dedupe, the
+    // post-lock re-read in transition()) depends on the DEFAULT READ COMMITTED
+    // isolation. Do NOT raise this to REPEATABLE READ / SERIALIZABLE here or in the
+    // DB — under a snapshot that predates a concurrent commit, those checks silently
+    // break with no test failure. (Fable review, trap.)
   });
 }

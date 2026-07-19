@@ -95,6 +95,22 @@ async function main() {
     }
     check("DB guard rejects illegal event (BUYER accept from OFFERED)", threw);
 
+    // E2) append-only: rewriting a deal_events row is blocked (tamper-evidence)
+    let updateBlocked = false;
+    try {
+      await sql`update public.deal_events set to_state = 'COMPLETED' where deal_id = ${dealId} and seq = 1`;
+    } catch {
+      updateBlocked = true;
+    }
+    check("deal_events UPDATE blocked (append-only)", updateBlocked);
+
+    // E3) outbox rows carry the (deal_id, event_seq) source for M4 dedupe/ordering
+    const ob = await sql<{ n: number }[]>`
+      select count(*)::int as n from public.outbox
+      where deal_id = ${dealId} and event_seq is not null
+    `;
+    check("outbox rows tagged with deal_id + event_seq", (ob[0]?.n ?? 0) >= 2, `${ob[0]?.n}`);
+
     // F) RLS — party vs stranger, via role + JWT-claims simulation
     await sql`insert into public.messages (deal_id, sender_id, body) values (${dealId}, ${buyer}, 'hello')`;
     async function asUser(uid: string, q: string) {
@@ -113,10 +129,21 @@ async function main() {
     check("RLS: buyer reads the message", buyerMsgs.length === 1);
     check("RLS: stranger reads 0 messages", strangerMsgs.length === 0, `${strangerMsgs.length}`);
   } finally {
+    // Remove deals first (RESTRICT FKs on the party ids), then the listing, then the
+    // users. deal_events/messages/deadlines cascade off deals.
+    const dealIds = await sql<{ id: string }[]>`
+      select id from public.deals
+      where buyer_id in ${sql([seller, buyer, stranger])} or seller_id in ${sql([seller, buyer, stranger])}
+    `;
+    if (dealIds.length) await sql`delete from public.outbox where deal_id in ${sql(dealIds.map((d) => d.id))}`;
+    await sql`delete from public.deals
+              where buyer_id in ${sql([seller, buyer, stranger])}
+                 or seller_id in ${sql([seller, buyer, stranger])}`;
+    await sql`delete from public.listings where seller_id = ${seller}`;
+    await sql.end({ timeout: 5 });
     for (const u of [seller, buyer, stranger]) {
       await fetch(`${BASE}/auth/v1/admin/users/${u}`, { method: "DELETE", headers: admin });
     }
-    await sql.end({ timeout: 5 });
   }
   console.log(`\nVERDICT → ${pass ? "PASS ✅ M3 machine internals (timers, guard, RLS) correct" : "FAIL ❌"}`);
   process.exit(pass ? 0 : 1);

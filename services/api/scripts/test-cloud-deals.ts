@@ -157,11 +157,20 @@ async function main() {
     const diDet = await getDeal(buyer.token, di);
     check("idempotent accept: only ONE accept event (2 total)", diDet.body.events.length === 2, `${diDet.body.events.length}`);
     check("idempotent accept: state ACCEPTED", diDet.body.state === "ACCEPTED");
+    // reusing the SAME key for a DIFFERENT action is a client bug → 409, not a silent no-op
+    const reuse = await act(seller.token, di, { action: "withdraw" }, k);
+    check("same key + different action → 409 reuse", reuse.status === 409, `${reuse.status}/${reuse.body?.error}`);
 
     // 7) deadline scheduled (service-role peek at internal table)
     const dl = await (await fetch(`${BASE}/rest/v1/deal_deadlines?deal_id=eq.${di}&select=action,due_at`, { headers: admin })).json();
     check("deadline scheduled for ACCEPTED deal (expire)", Array.isArray(dl) && dl[0]?.action === "expire", JSON.stringify(dl).slice(0, 80));
   } finally {
+    // deals.buyer_id/seller_id are ON DELETE RESTRICT now (audit-trail safety), so
+    // remove the test users' deals first (cascades events/messages/deadlines); then
+    // deleting the users cascades their listings.
+    const ids = users.map((u) => u.id).join(",");
+    await fetch(`${BASE}/rest/v1/deals?buyer_id=in.(${ids})`, { method: "DELETE", headers: admin });
+    await fetch(`${BASE}/rest/v1/deals?seller_id=in.(${ids})`, { method: "DELETE", headers: admin });
     for (const u of users) await fetch(`${BASE}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: admin });
   }
   console.log(`\nVERDICT → ${pass ? "PASS ✅ M3 deals + chat + concurrency work end-to-end" : "FAIL ❌"}`);

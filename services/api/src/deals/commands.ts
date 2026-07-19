@@ -38,7 +38,11 @@ export type DealRow = {
 
 export type CommandResult =
   | { ok: true; deal: DealRow; replay?: boolean }
-  | { ok: false; code: "not_found" | "illegal" | "conflict" | "stale"; from?: DealState };
+  | {
+      ok: false;
+      code: "not_found" | "illegal" | "conflict" | "stale" | "idempotency_reuse";
+      from?: DealState;
+    };
 
 export type CreateResult =
   | { ok: true; deal: DealRow; existing?: boolean }
@@ -93,8 +97,10 @@ export async function createOffer(
     `;
     await syncDeadline(sql, deal!.id, "OFFERED", deal!.state_token);
     await sql`
-      insert into public.outbox (topic, payload)
-      values ('deal.created', ${sql.json({ dealId: deal!.id, listingId: p.listingId, buyerId: p.buyerId, sellerId: listing.seller_id })})
+      insert into public.outbox (topic, payload, deal_id, event_seq)
+      values ('deal.created',
+        ${sql.json({ dealId: deal!.id, seq: 1, listingId: p.listingId, buyerId: p.buyerId, sellerId: listing.seller_id })},
+        ${deal!.id}, 1)
     `;
     return { ok: true, deal: deal! };
   });
@@ -123,11 +129,17 @@ export async function transition(
     if (!deal) return { ok: false, code: "not_found" };
 
     if (p.idempotencyKey) {
-      const [prior] = await sql`
-        select 1 from public.deal_events
+      // Safe under the row lock: request B blocks above until A commits, then sees
+      // A's event (READ COMMITTED fresh snapshot). Same key + same action = replay;
+      // same key + DIFFERENT action = client bug, refuse rather than silently no-op.
+      const [prior] = await sql<{ action: string }[]>`
+        select action from public.deal_events
         where deal_id = ${p.dealId} and idempotency_key = ${p.idempotencyKey} limit 1
       `;
-      if (prior) return { ok: true, deal, replay: true };
+      if (prior) {
+        if (prior.action !== p.action) return { ok: false, code: "idempotency_reuse" };
+        return { ok: true, deal, replay: true };
+      }
     }
 
     if (p.expectedStateToken && p.expectedStateToken !== deal.state_token) {
@@ -160,8 +172,10 @@ export async function transition(
     `;
     await syncDeadline(sql, p.dealId, to, newToken);
     await sql`
-      insert into public.outbox (topic, payload)
-      values ('deal.transition', ${sql.json({ dealId: p.dealId, from: deal.state, to, actor: p.actor, action: p.action })})
+      insert into public.outbox (topic, payload, deal_id, event_seq)
+      values ('deal.transition',
+        ${sql.json({ dealId: p.dealId, seq: next_seq, from: deal.state, to, actor: p.actor, action: p.action })},
+        ${p.dealId}, ${next_seq})
     `;
     return { ok: true, deal: updated[0]! };
   });

@@ -11,11 +11,14 @@ import { TRANSITIONS, DEAL_STATES, TERMINAL_STATES } from "../src/deals/machine.
  * can never write one. Committed + drift-checked via `pnpm gen` (like the OpenAPI
  * artifact), so the DB guard can never silently diverge from the app's map.
  */
-// Emitted as a numbered migration so it applies (guard functions first) before the
-// deals schema that references them. All create-or-replace, so re-applying on every
-// machine.ts change is idempotent.
+// Emitted as numbered migrations so they apply in order: the guard FUNCTIONS
+// (0006) before the deals schema that references them (0007), and the CONSTRAINTS
+// that reference the deals table (0009) after it. All idempotent, so regenerating
+// on every machine.ts change is safe.
 const here = dirname(fileURLToPath(import.meta.url));
-const out = resolve(here, "../../../supabase/migrations/0006_deal_guard.generated.sql");
+const migrations = resolve(here, "../../../supabase/migrations");
+const out = resolve(migrations, "0006_deal_guard.generated.sql");
+const constraintsOut = resolve(migrations, "0009_deal_constraints.generated.sql");
 
 const rows = TRANSITIONS.map(
   (t) => `    ('${t.from}', '${t.actor}', '${t.action}', '${t.to}')`,
@@ -48,5 +51,21 @@ $$;
 `;
 
 writeFileSync(out, sql, "utf8");
+
+// Constraints that reference the deals TABLE (so they apply after 0007). The
+// one-active-deal partial-unique index is generated from TERMINAL_STATES so its
+// predicate can never drift from the machine (Fable review #5).
+const constraintsSql = `-- GENERATED from src/deals/machine.ts by scripts/gen-deal-guard.ts — DO NOT EDIT.
+-- Regenerate with \`pnpm gen\`; CI fails on drift. Applies after 0007 (needs deals).
+
+-- At most one ACTIVE (non-terminal) deal per (listing, buyer). A DB backstop under
+-- createOffer's app-level dedupe. Predicate lists the terminal states literally so
+-- it stays in lockstep with machine.ts TERMINAL_STATES.
+create unique index if not exists deals_one_active_per_buyer
+  on public.deals (listing_id, buyer_id)
+  where state not in (${terminals});
+`;
+writeFileSync(constraintsOut, constraintsSql, "utf8");
+
 // eslint-disable-next-line no-console
-console.log(`[deal-guard] wrote ${out} (${TRANSITIONS.length} transitions)`);
+console.log(`[deal-guard] wrote ${out} (${TRANSITIONS.length} transitions) + ${constraintsOut}`);

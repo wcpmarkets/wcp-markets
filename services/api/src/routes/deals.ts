@@ -277,7 +277,13 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       });
       if (!r.ok) {
         if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
-        return c.json({ error: r.code === "illegal" ? "illegal_transition" : "conflict" }, 409);
+        const err =
+          r.code === "illegal"
+            ? "illegal_transition"
+            : r.code === "idempotency_reuse"
+              ? "idempotency_key_reuse"
+              : "conflict";
+        return c.json({ error: err }, 409);
       }
       return c.json(toDeal(r.deal, user.sub), 200);
     },
