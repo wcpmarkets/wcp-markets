@@ -66,7 +66,7 @@ export function createApp() {
     }),
     async (c) => {
       const user = c.get("user");
-      const db = getDb();
+      const db = await getDb();
       if (!db) {
         return c.json({
           userId: user.sub,
@@ -138,7 +138,7 @@ export function createApp() {
     }),
     async (c) => {
       const { phone } = c.req.valid("json");
-      const db = getDb();
+      const db = await getDb();
       if (db) {
         const checks: { bucket: string; limit: number }[] = [
           { bucket: `otp:phone:${phone}`, limit: 3 },

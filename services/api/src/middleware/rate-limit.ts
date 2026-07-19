@@ -24,7 +24,7 @@ export function rateLimit(opts: {
   keys: (c: Context) => string[];
 }) {
   return createMiddleware(async (c, next) => {
-    const db = getDb();
+    const db = await getDb();
     if (!db) {
       console.warn(`[rate-limit] no DB — '${opts.prefix}' not enforced (dev).`);
       return next();

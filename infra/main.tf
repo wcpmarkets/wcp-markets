@@ -30,6 +30,31 @@ resource "aws_iam_role_policy_attachment" "api_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+data "aws_caller_identity" "current" {}
+
+# Let the Lambda read + decrypt its secrets from SSM (/wcp/api/*).
+resource "aws_iam_role_policy" "api_ssm" {
+  name = "${local.name}-ssm-read"
+  role = aws_iam_role.api.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:eu-west-1:${data.aws_caller_identity.current.account_id}:parameter/wcp/api/*"
+      },
+      {
+        # Decrypt SecureString params (AWS-managed aws/ssm key). Tighten to the
+        # specific key ARN later.
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # ── Log group (explicit, so we control retention from day one) ──────────────
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/aws/lambda/${local.name}"
@@ -52,9 +77,10 @@ resource "aws_lambda_function" "api" {
     variables = {
       # Public value → enables cloud ES256/JWKS token verification on /me.
       SUPABASE_URL = var.supabase_url
-      # DATABASE_URL (secret, Supavisor pooler) + SUPABASE_ANON_KEY get wired via
-      # SSM next; without DATABASE_URL, /me verifies the token and returns the
-      # stub profile (no DB write).
+      # Name (not value) of the SSM SecureString holding the Supavisor pooler
+      # connection string. The Lambda fetches + decrypts it at runtime — the
+      # secret is never in this env config, TF state, or git.
+      DATABASE_URL_SSM = "/wcp/api/database-url"
     }
   }
 
