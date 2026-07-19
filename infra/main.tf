@@ -48,8 +48,15 @@ resource "aws_lambda_function" "api" {
   memory_size      = 256
   timeout          = 15
 
-  # Secrets (DATABASE_URL, SUPABASE_*, JWT secret) get wired via SSM in a later
-  # step; health works without them, and /me + /auth degrade gracefully.
+  environment {
+    variables = {
+      # Public value → enables cloud ES256/JWKS token verification on /me.
+      SUPABASE_URL = var.supabase_url
+      # DATABASE_URL (secret, Supavisor pooler) + SUPABASE_ANON_KEY get wired via
+      # SSM next; without DATABASE_URL, /me verifies the token and returns the
+      # stub profile (no DB write).
+    }
+  }
 
   depends_on = [aws_cloudwatch_log_group.api]
 }
