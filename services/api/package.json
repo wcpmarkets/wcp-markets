@@ -10,6 +10,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "gen:openapi": "tsx scripts/emit-openapi.ts",
+    "gen:deal-guard": "tsx scripts/gen-deal-guard.ts",
     "build:lambda": "esbuild src/lambda.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/lambda.mjs --external:@aws-sdk/*",
     "typecheck": "tsc --noEmit"
   },
