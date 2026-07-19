@@ -1,37 +1,51 @@
 import { createMiddleware } from "hono/factory";
-import { verify, decode } from "hono/jwt";
+import {
+  jwtVerify,
+  createRemoteJWKSet,
+  decodeProtectedHeader,
+  type JWTPayload,
+} from "jose";
 
 /** The authenticated caller, derived from a verified Supabase JWT. */
 export type AuthUser = { sub: string; phone: string | null };
 
 export type AuthEnv = { Variables: { user: AuthUser } };
 
-/**
- * Verifies the `Authorization: Bearer <jwt>` Supabase access token and puts the
- * user on the context. Real verification uses `SUPABASE_JWT_SECRET` (HS256).
- *
- * NOTE: until the secret is wired (local Supabase / M0 deploy), this DECODES the
- * token WITHOUT verifying — dev only, and it says so loudly. Never ship without
- * the secret set.
- */
+// Supabase issues either symmetric (HS256, legacy / local dev) or asymmetric
+// (ES256/RS256 via JWKS, current cloud default) tokens. We verify by the token's
+// own `alg`: HS256 against SUPABASE_JWT_SECRET; anything else against the
+// project's JWKS. The remote JWKS is fetched + cached by jose.
+let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+function getJwks() {
+  if (jwks) return jwks;
+  const url = process.env.SUPABASE_URL;
+  if (!url) return null;
+  jwks = createRemoteJWKSet(new URL(`${url}/auth/v1/.well-known/jwks.json`));
+  return jwks;
+}
+
 export const auth = createMiddleware<AuthEnv>(async (c, next) => {
   const header = c.req.header("Authorization");
   const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return c.json({ error: "unauthorized" }, 401);
 
-  const secret = process.env.SUPABASE_JWT_SECRET;
+  let alg: string | undefined;
   try {
-    let payload: Record<string, unknown>;
-    if (secret) {
-      payload = (await verify(token, secret, "HS256")) as Record<
-        string,
-        unknown
-      >;
+    alg = decodeProtectedHeader(token).alg;
+  } catch {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  try {
+    let payload: JWTPayload;
+    if (alg === "HS256") {
+      const secret = process.env.SUPABASE_JWT_SECRET;
+      if (!secret) throw new Error("HS256 token but SUPABASE_JWT_SECRET unset");
+      ({ payload } = await jwtVerify(token, new TextEncoder().encode(secret)));
     } else {
-      console.warn(
-        "[auth] SUPABASE_JWT_SECRET not set — decoding token WITHOUT verification (dev only).",
-      );
-      payload = decode(token).payload as Record<string, unknown>;
+      const keys = getJwks();
+      if (!keys) throw new Error("asymmetric token but SUPABASE_URL unset");
+      ({ payload } = await jwtVerify(token, keys));
     }
 
     const sub = payload.sub;
@@ -44,7 +58,7 @@ export const auth = createMiddleware<AuthEnv>(async (c, next) => {
   }
 });
 
-function readPhone(payload: Record<string, unknown>): string | null {
+function readPhone(payload: JWTPayload): string | null {
   if (typeof payload.phone === "string") return payload.phone;
   const meta = payload.user_metadata;
   if (meta && typeof meta === "object" && "phone" in meta) {

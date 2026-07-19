@@ -130,6 +130,9 @@ importers:
       hono:
         specifier: ^4.6.14
         version: 4.12.30
+      jose:
+        specifier: ^5.9.6
+        version: 5.10.0
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
@@ -1019,6 +1022,9 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
+
+  jose@5.10.0:
+    resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
 
   js-levenshtein@1.1.6:
     resolution: {integrity: sha512-X2BB11YZtrRqY4EnQcLX5Rh373zbK4alC1FW7D7MBhL2gtcC17cTnr6DmfHZeS0s2rTHjUTMMHfG7gO8SSdw+g==}
@@ -1967,6 +1973,8 @@ snapshots:
   index-to-position@1.2.0: {}
 
   jiti@2.7.0: {}
+
+  jose@5.10.0: {}
 
   js-levenshtein@1.1.6: {}
 
