@@ -16,6 +16,12 @@ export function Footer() {
           <span className="text-[15px] font-bold">WCP Markets</span>
         </div>
         <span className="text-[12px] text-faint">{footer.copyright}</span>
+        <a
+          href="/privacy"
+          className="text-[12px] text-muted transition-colors hover:text-ink"
+        >
+          Privacy
+        </a>
         {/* Spacer only in the desktop row; hidden on mobile so the column
             doesn't stretch. */}
         <div className="hidden flex-1 sm:block" />

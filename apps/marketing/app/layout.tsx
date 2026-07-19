@@ -11,6 +11,7 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.wcpmarkets.com"),
   title: "WCP Markets — Buy and sell anything. Money held safe.",
   description:
     "WCP Markets is a marketplace for goods, property, vehicles and services — where every naira sits in escrow until you confirm the deal. Join the waitlist.",
