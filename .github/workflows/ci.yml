@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Contract governance: regenerate the OpenAPI artifact + TS client and fail
+      # if they differ from what's committed (the committed spec is the contract;
+      # it must never drift from the code silently).
+      - name: Regenerate contract + client
+        run: pnpm gen
+      - name: Contract / client drift check
+        run: |
+          git diff --exit-code -- contracts/openapi.json packages/api-client/src/schema.ts \
+            || (echo "::error::Contract or generated client is out of date. Run 'pnpm gen' and commit." && exit 1)
+
+      - run: pnpm typecheck
+
+      - run: pnpm build

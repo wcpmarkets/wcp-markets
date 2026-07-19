@@ -1,5 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { auth, type AuthEnv } from "./middleware/auth.js";
+import { clientIp } from "./middleware/rate-limit.js";
+import { getDb } from "./db.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -7,12 +9,15 @@ import { auth, type AuthEnv } from "./middleware/auth.js";
  * OpenAPI document (see scripts/emit-openapi.ts). Runs locally via server.ts and
  * (later) as an AWS Lambda.
  *
- * Phase-2 M0 scaffold: `/health` (public) + `/me` (auth). Grows one milestone at
- * a time.
+ * Phase-2 M0 scaffold: `/health`, `/me`, `/auth/otp/request`. Grows one milestone
+ * at a time.
  */
 export function createApp() {
   const app = new OpenAPIHono<AuthEnv>();
 
+  const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
+
+  // ── GET /health ───────────────────────────────────────────────────────────
   const HealthSchema = z
     .object({ status: z.literal("ok"), ts: z.string() })
     .openapi("Health");
@@ -33,15 +38,21 @@ export function createApp() {
     (c) => c.json({ status: "ok" as const, ts: new Date().toISOString() }),
   );
 
+  // ── GET /me ─────────────────────────────────────────────────────────────────
   const MeSchema = z
-    .object({ userId: z.string(), phone: z.string().nullable() })
+    .object({
+      userId: z.string(),
+      phone: z.string().nullable(),
+      displayName: z.string().nullable(),
+      verificationLevel: z.number().int(),
+    })
     .openapi("Me");
 
   app.openapi(
     createRoute({
       method: "get",
       path: "/me",
-      summary: "The authenticated user",
+      summary: "The authenticated user's profile",
       tags: ["users"],
       security: [{ bearerAuth: [] }],
       middleware: [auth] as const,
@@ -53,9 +64,105 @@ export function createApp() {
         401: { description: "Missing or invalid token" },
       },
     }),
-    (c) => {
+    async (c) => {
       const user = c.get("user");
-      return c.json({ userId: user.sub, phone: user.phone });
+      const db = getDb();
+      if (!db) {
+        return c.json({
+          userId: user.sub,
+          phone: user.phone,
+          displayName: null,
+          verificationLevel: 1,
+        });
+      }
+      // Upsert-on-first-sign-in, then read the profile (service-role write).
+      const rows = await db<
+        { display_name: string | null; phone: string | null; verification_level: number }[]
+      >`
+        insert into public.profiles (id, phone)
+        values (${user.sub}, ${user.phone})
+        on conflict (id) do update
+          set updated_at = now(),
+              phone = coalesce(public.profiles.phone, ${user.phone})
+        returning display_name, phone, verification_level
+      `;
+      const p = rows[0]!;
+      return c.json({
+        userId: user.sub,
+        phone: p.phone,
+        displayName: p.display_name,
+        verificationLevel: p.verification_level,
+      });
+    },
+  );
+
+  // ── POST /auth/otp/request ──────────────────────────────────────────────────
+  // Throttled OTP request. Rate-limiting lives HERE (per-phone + per-IP) so a bare
+  // SMS-sending endpoint can't be pumped. Forwards to Supabase Auth when
+  // configured; 501 until SUPABASE_URL/ANON_KEY are set.
+  const OtpOk = z.object({ status: z.literal("sent") }).openapi("OtpRequested");
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/auth/otp/request",
+      summary: "Request a phone OTP (rate-limited)",
+      tags: ["auth"],
+      request: {
+        body: {
+          content: {
+            "application/json": {
+              schema: z.object({ phone: z.string().min(8) }).openapi("OtpRequest"),
+            },
+          },
+        },
+      },
+      responses: {
+        202: {
+          description: "OTP dispatched",
+          content: { "application/json": { schema: OtpOk } },
+        },
+        429: {
+          description: "Rate limited",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
+        501: {
+          description: "Auth not configured",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
+        502: {
+          description: "Upstream OTP send failed",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
+      },
+    }),
+    async (c) => {
+      const { phone } = c.req.valid("json");
+      const db = getDb();
+      if (db) {
+        const checks: { bucket: string; limit: number }[] = [
+          { bucket: `otp:phone:${phone}`, limit: 3 },
+          { bucket: `otp:ip:${clientIp(c)}`, limit: 10 },
+        ];
+        for (const ch of checks) {
+          const rows = await db<{ allowed: boolean }[]>`
+            select public.consume_rate_limit(${ch.bucket}, ${ch.limit}, ${900}) as allowed
+          `;
+          if (!rows[0]?.allowed) return c.json({ error: "rate_limited" }, 429);
+        }
+      }
+
+      const url = process.env.SUPABASE_URL;
+      const anon = process.env.SUPABASE_ANON_KEY;
+      if (!url || !anon) return c.json({ error: "auth_not_configured" }, 501);
+
+      const res = await fetch(`${url}/auth/v1/otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: anon },
+        body: JSON.stringify({ phone, create_user: true }),
+      });
+      if (!res.ok) return c.json({ error: "otp_send_failed" }, 502);
+      return c.json({ status: "sent" as const }, 202);
     },
   );
 
