@@ -1,0 +1,11 @@
+# Terraform local artifacts — state lives in S3, never commit it.
+.terraform/
+*.tfstate
+*.tfstate.*
+build/
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
