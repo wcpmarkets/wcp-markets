@@ -11,8 +11,11 @@ import { TRANSITIONS, DEAL_STATES, TERMINAL_STATES } from "../src/deals/machine.
  * can never write one. Committed + drift-checked via `pnpm gen` (like the OpenAPI
  * artifact), so the DB guard can never silently diverge from the app's map.
  */
+// Emitted as a numbered migration so it applies (guard functions first) before the
+// deals schema that references them. All create-or-replace, so re-applying on every
+// machine.ts change is idempotent.
 const here = dirname(fileURLToPath(import.meta.url));
-const out = resolve(here, "../src/deals/deal-guard.generated.sql");
+const out = resolve(here, "../../../supabase/migrations/0006_deal_guard.generated.sql");
 
 const rows = TRANSITIONS.map(
   (t) => `    ('${t.from}', '${t.actor}', '${t.action}', '${t.to}')`,

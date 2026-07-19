@@ -1,0 +1,168 @@
+import { randomUUID } from "node:crypto";
+import type postgres from "postgres";
+import {
+  type Actor,
+  type DealAction,
+  type DealState,
+  DEADLINES,
+  nextState,
+} from "./machine.js";
+
+/**
+ * The deal command handler — the deterministic transactional core. Every command
+ * runs in ONE Postgres tx with:
+ *   • idempotency: a (deal_id, idempotency_key) prior event → no-op replay
+ *   • SELECT ... FOR UPDATE on the deal row → commands on one deal serialize
+ *   • state_token rotation → stale timers (and optional client optimistic checks) 409
+ *   • the transition validated by the TS machine AND the DB guard trigger
+ *   • deadline sync + a transactional-outbox row, all in the SAME tx (never
+ *     enqueue-after-commit)
+ * No money-math here (M4 adds it); M3 wires the negotiation actions only.
+ */
+
+export type Sql = postgres.Sql;
+type Tx = postgres.TransactionSql<Record<string, never>>;
+
+export type DealRow = {
+  id: string;
+  listing_id: string;
+  buyer_id: string;
+  seller_id: string;
+  state: DealState;
+  state_token: string;
+  price_kobo: string | number;
+  qty: number;
+  created_at: string | Date;
+  updated_at: string | Date;
+};
+
+export type CommandResult =
+  | { ok: true; deal: DealRow; replay?: boolean }
+  | { ok: false; code: "not_found" | "illegal" | "conflict" | "stale"; from?: DealState };
+
+export type CreateResult =
+  | { ok: true; deal: DealRow; existing?: boolean }
+  | { ok: false; code: "listing_unavailable" | "own_listing" };
+
+/** Set/refresh the single active deadline for a deal's new state, or clear it. */
+async function syncDeadline(sql: Tx, dealId: string, state: DealState, token: string) {
+  const d = DEADLINES[state];
+  if (!d) {
+    await sql`delete from public.deal_deadlines where deal_id = ${dealId}`;
+    return;
+  }
+  await sql`
+    insert into public.deal_deadlines (deal_id, due_at, action, state_token)
+    values (${dealId}, now() + make_interval(hours => ${d.hours}), ${d.action}, ${token})
+    on conflict (deal_id) do update
+      set due_at = excluded.due_at, action = excluded.action, state_token = excluded.state_token
+  `;
+}
+
+/** Genesis: a buyer opens an offer on a listing → a new deal in OFFERED. */
+export async function createOffer(
+  db: Sql,
+  p: { listingId: string; buyerId: string; priceKobo: number; qty: number; idempotencyKey?: string },
+): Promise<CreateResult> {
+  return db.begin(async (sql) => {
+    // Lock the listing so concurrent genesis on the same listing serialise.
+    const [listing] = await sql<{ seller_id: string; status: string }[]>`
+      select seller_id, status from public.listings where id = ${p.listingId} for update
+    `;
+    if (!listing || listing.status !== "active") return { ok: false, code: "listing_unavailable" };
+    if (listing.seller_id === p.buyerId) return { ok: false, code: "own_listing" };
+
+    // One active negotiation per (listing, buyer): dedupes double-taps + reopens.
+    const [existing] = await sql<DealRow[]>`
+      select * from public.deals
+      where listing_id = ${p.listingId} and buyer_id = ${p.buyerId}
+        and state <> all (public.deal_terminal_states())
+      limit 1
+    `;
+    if (existing) return { ok: true, deal: existing, existing: true };
+
+    const [deal] = await sql<DealRow[]>`
+      insert into public.deals (listing_id, buyer_id, seller_id, state, price_kobo, qty)
+      values (${p.listingId}, ${p.buyerId}, ${listing.seller_id}, 'OFFERED', ${p.priceKobo}, ${p.qty})
+      returning *
+    `;
+    await sql`
+      insert into public.deal_events
+        (deal_id, seq, actor, actor_id, action, from_state, to_state, price_kobo, qty, idempotency_key)
+      values (${deal!.id}, 1, 'BUYER', ${p.buyerId}, 'offer', null, 'OFFERED', ${p.priceKobo}, ${p.qty}, ${p.idempotencyKey ?? null})
+    `;
+    await syncDeadline(sql, deal!.id, "OFFERED", deal!.state_token);
+    await sql`
+      insert into public.outbox (topic, payload)
+      values ('deal.created', ${sql.json({ dealId: deal!.id, listingId: p.listingId, buyerId: p.buyerId, sellerId: listing.seller_id })})
+    `;
+    return { ok: true, deal: deal! };
+  });
+}
+
+/** Apply a transition to an existing deal (user action or SYSTEM timer/webhook). */
+export async function transition(
+  db: Sql,
+  p: {
+    dealId: string;
+    actor: Actor;
+    actorId?: string | null;
+    action: DealAction;
+    priceKobo?: number;
+    qty?: number;
+    reason?: string;
+    idempotencyKey?: string;
+    /** SYSTEM timers pass the token they were scheduled with; a mismatch = stale, skip. */
+    expectedStateToken?: string;
+  },
+): Promise<CommandResult> {
+  return db.begin(async (sql) => {
+    const [deal] = await sql<DealRow[]>`
+      select * from public.deals where id = ${p.dealId} for update
+    `;
+    if (!deal) return { ok: false, code: "not_found" };
+
+    if (p.idempotencyKey) {
+      const [prior] = await sql`
+        select 1 from public.deal_events
+        where deal_id = ${p.dealId} and idempotency_key = ${p.idempotencyKey} limit 1
+      `;
+      if (prior) return { ok: true, deal, replay: true };
+    }
+
+    if (p.expectedStateToken && p.expectedStateToken !== deal.state_token) {
+      return { ok: false, code: "stale" }; // a user action already moved the deal
+    }
+
+    const to = nextState(deal.state, p.actor, p.action);
+    if (!to) return { ok: false, code: "illegal", from: deal.state };
+
+    const newToken = randomUUID();
+    const setPrice = p.priceKobo != null ? sql`, price_kobo = ${p.priceKobo}` : sql``;
+    const setQty = p.qty != null ? sql`, qty = ${p.qty}` : sql``;
+    const updated = await sql<DealRow[]>`
+      update public.deals
+      set state = ${to}, state_token = ${newToken} ${setPrice} ${setQty}
+      where id = ${p.dealId} and state_token = ${deal.state_token}
+      returning *
+    `;
+    if (updated.length === 0) return { ok: false, code: "conflict" };
+
+    const seqRows = await sql<{ next_seq: number }[]>`
+      select coalesce(max(seq), 0) + 1 as next_seq from public.deal_events where deal_id = ${p.dealId}
+    `;
+    const next_seq = seqRows[0]!.next_seq;
+    await sql`
+      insert into public.deal_events
+        (deal_id, seq, actor, actor_id, action, from_state, to_state, price_kobo, qty, reason, idempotency_key)
+      values (${p.dealId}, ${next_seq}, ${p.actor}, ${p.actorId ?? null}, ${p.action},
+              ${deal.state}, ${to}, ${p.priceKobo ?? null}, ${p.qty ?? null}, ${p.reason ?? null}, ${p.idempotencyKey ?? null})
+    `;
+    await syncDeadline(sql, p.dealId, to, newToken);
+    await sql`
+      insert into public.outbox (topic, payload)
+      values ('deal.transition', ${sql.json({ dealId: p.dealId, from: deal.state, to, actor: p.actor, action: p.action })})
+    `;
+    return { ok: true, deal: updated[0]! };
+  });
+}
