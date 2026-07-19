@@ -56,8 +56,8 @@ export default async function OpengraphImage() {
           </div>
         </div>
 
-        {/* headline pinned to the bottom */}
-        <div style={{ display: "flex", flexDirection: "column", marginTop: "auto" }}>
+        {/* headline block — gap under the brand row reduced ~1/3 vs a bottom-pin */}
+        <div style={{ display: "flex", flexDirection: "column", marginTop: 132 }}>
           <div
             style={{
               fontSize: 78,
