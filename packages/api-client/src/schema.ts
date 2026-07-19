@@ -238,6 +238,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/listings/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search active listings (full-text + filters) */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                    category?: string;
+                    condition?: "new" | "used" | "refurbished";
+                    minPrice?: number | null;
+                    maxPrice?: number | null;
+                    location?: string;
+                    limit?: number;
+                    offset?: number | null;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Ranked search results */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListingSearchPage"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/listings/mine": {
         parameters: {
             query?: never;
@@ -530,6 +584,10 @@ export interface components {
         ListingPage: {
             items: components["schemas"]["Listing"][];
             nextCursor: string | null;
+        };
+        ListingSearchPage: {
+            items: components["schemas"]["Listing"][];
+            nextOffset: number | null;
         };
         ListingUpdate: {
             category?: string;

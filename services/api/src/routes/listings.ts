@@ -81,6 +81,13 @@ const ListingPageSchema = z
   })
   .openapi("ListingPage");
 
+const ListingSearchPageSchema = z
+  .object({
+    items: z.array(ListingSchema),
+    nextOffset: z.number().int().nullable(),
+  })
+  .openapi("ListingSearchPage");
+
 const ImageUploadRequestSchema = z
   .object({
     contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
@@ -236,6 +243,74 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       const nextCursor =
         rows.length === take ? iso(rows[rows.length - 1]!.created_at) : null;
       return c.json({ items, nextCursor }, 200);
+    },
+  );
+
+  // ── GET /listings/search — full-text + fuzzy + filters (ranked) ─────────────
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/listings/search",
+      summary: "Search active listings (full-text + filters)",
+      tags: ["listings"],
+      request: {
+        query: z.object({
+          q: z.string().max(120).optional(),
+          category: z.string().max(64).optional(),
+          condition: z.enum(CONDITIONS).optional(),
+          minPrice: z.coerce.number().int().nonnegative().optional(),
+          maxPrice: z.coerce.number().int().nonnegative().optional(),
+          location: z.string().max(120).optional(),
+          limit: z.coerce.number().int().min(1).max(50).optional(),
+          offset: z.coerce.number().int().min(0).optional(),
+        }),
+      },
+      responses: {
+        200: {
+          description: "Ranked search results",
+          content: { "application/json": { schema: ListingSearchPageSchema } },
+        },
+        503: {
+          description: "Database unavailable",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
+      },
+    }),
+    async (c) => {
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const { q, category, condition, minPrice, maxPrice, location } =
+        c.req.valid("query");
+      const limit = c.req.valid("query").limit ?? 20;
+      const offset = c.req.valid("query").offset ?? 0;
+
+      // Compose the WHERE by nesting postgres.js fragments (all values bound).
+      let where = db`status = 'active'`;
+      if (category) where = db`${where} and category = ${category}`;
+      if (condition) where = db`${where} and condition = ${condition}`;
+      if (minPrice != null) where = db`${where} and price_kobo >= ${minPrice}`;
+      if (maxPrice != null) where = db`${where} and price_kobo <= ${maxPrice}`;
+      if (location) where = db`${where} and location ilike ${"%" + location + "%"}`;
+      if (q)
+        // FTS match OR a fuzzy word-similarity match on the title (typo tolerance;
+        // word_similarity finds the best-matching word within the title, so a long
+        // title still matches a single mistyped term).
+        where = db`${where} and (search_vector @@ websearch_to_tsquery('english', ${q}) or word_similarity(${q}, title) > 0.25)`;
+
+      // Rank by FTS relevance, then fuzzy closeness; else newest first.
+      const order = q
+        ? db`order by ts_rank(search_vector, websearch_to_tsquery('english', ${q})) desc, word_similarity(${q}, title) desc, created_at desc`
+        : db`order by created_at desc`;
+
+      const rows = await db<Row[]>`
+        select ${db.unsafe(SELECT)} from public.listings
+        where ${where}
+        ${order}
+        limit ${limit} offset ${offset}
+      `;
+      const items = await Promise.all(rows.map(toListing));
+      const nextOffset = rows.length === limit ? offset + limit : null;
+      return c.json({ items, nextOffset }, 200);
     },
   );
 
