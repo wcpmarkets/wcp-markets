@@ -84,6 +84,8 @@ resource "aws_lambda_function" "api" {
       # Same pattern for the Supabase service key (used to mint signed Storage
       # URLs for the private listing-images bucket).
       SUPABASE_SECRET_KEY_SSM = "/wcp/api/supabase-secret-key"
+      # HMAC secret for verifying escrow-partner (Mock) webhook signatures.
+      ESCROW_WEBHOOK_SECRET_SSM = "/wcp/api/escrow-webhook-secret"
     }
   }
 
@@ -316,4 +318,82 @@ resource "aws_cloudwatch_metric_alarm" "sweeper_not_running" {
   alarm_description    = "Sweeper has not run in 5 minutes — escrow timers are frozen."
   alarm_actions       = [aws_sns_topic.alerts.arn]
   ok_actions          = [aws_sns_topic.alerts.arn]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The escrow orchestrator (M4): an SQS consumer on the deal-events queue that turns
+# escrow.* outbox commands into (mock) provider calls + signed webhooks back to the
+# API. Non-escrow messages are acked untouched.
+# ─────────────────────────────────────────────────────────────────────────────
+resource "aws_iam_role" "consumer" {
+  name               = "${local.name}-consumer-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "consumer_logs" {
+  role       = aws_iam_role.consumer.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "consumer_perms" {
+  name = "${local.name}-consumer-perms"
+  role = aws_iam_role.consumer.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:eu-west-1:${data.aws_caller_identity.current.account_id}:parameter/wcp/api/*"
+      },
+      { Effect = "Allow", Action = ["kms:Decrypt"], Resource = "*" },
+      {
+        Effect   = "Allow"
+        Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Resource = aws_sqs_queue.deal_events.arn
+      },
+    ]
+  })
+}
+
+data "archive_file" "consumer" {
+  type        = "zip"
+  source_file = "${path.module}/../services/api/dist/consumer.mjs"
+  output_path = "${path.module}/build/consumer.zip"
+}
+
+resource "aws_cloudwatch_log_group" "consumer" {
+  name              = "/aws/lambda/${local.name}-consumer"
+  retention_in_days = 14
+}
+
+resource "aws_lambda_function" "consumer" {
+  function_name    = "${local.name}-consumer"
+  role             = aws_iam_role.consumer.arn
+  runtime          = "nodejs22.x"
+  architectures    = ["arm64"]
+  handler          = "consumer.handler"
+  filename         = data.archive_file.consumer.output_path
+  source_code_hash = data.archive_file.consumer.output_base64sha256
+  memory_size      = 256
+  timeout          = 30
+
+  environment {
+    variables = {
+      ESCROW_WEBHOOK_SECRET_SSM = "/wcp/api/escrow-webhook-secret"
+      API_URL                   = aws_apigatewayv2_api.http.api_endpoint
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.consumer]
+}
+
+# Poll the deal-events queue → invoke the consumer. ReportBatchItemFailures so only a
+# failed record is retried, not the whole batch.
+resource "aws_lambda_event_source_mapping" "consumer" {
+  event_source_arn                   = aws_sqs_queue.deal_events.arn
+  function_name                      = aws_lambda_function.consumer.arn
+  batch_size                         = 10
+  maximum_batching_window_in_seconds = 5
+  function_response_types            = ["ReportBatchItemFailures"]
 }

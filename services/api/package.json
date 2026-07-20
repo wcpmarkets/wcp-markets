@@ -13,11 +13,13 @@
     "gen:deal-guard": "tsx scripts/gen-deal-guard.ts",
     "build:lambda": "esbuild src/lambda.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/lambda.mjs --external:@aws-sdk/*",
     "build:sweeper": "esbuild src/sweeper.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/sweeper.mjs --external:@aws-sdk/*",
+    "build:consumer": "esbuild src/consumer.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/consumer.mjs --external:@aws-sdk/*",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@hono/zod-openapi": "^0.18.3",
+    "@wcp/escrow": "workspace:*",
     "hono": "^4.6.14",
     "jose": "^5.9.6",
     "postgres": "^3.4.5",

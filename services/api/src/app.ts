@@ -4,6 +4,7 @@ import { clientIp } from "./middleware/rate-limit.js";
 import { getDb } from "./db.js";
 import { registerListings } from "./routes/listings.js";
 import { registerDeals } from "./routes/deals.js";
+import { registerWebhooks } from "./routes/webhooks.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -173,6 +174,9 @@ export function createApp() {
 
   // ── Deals + chat (M3) ─────────────────────────────────────────────────────
   registerDeals(app);
+
+  // ── Escrow webhooks (M4) — raw signed endpoint, not in the client contract ──
+  registerWebhooks(app);
 
   // Security scheme for the emitted spec.
   app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
