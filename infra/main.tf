@@ -158,3 +158,103 @@ resource "aws_lambda_permission" "apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*/*"
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The sweeper: a 60s EventBridge cron → Lambda that fires due deal deadlines
+# (auto-expiry/release/refund) and relays the transactional outbox to SQS.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Outbox target: a standard queue + DLQ ────────────────────────────────────
+resource "aws_sqs_queue" "deal_events_dlq" {
+  name                      = "${local.name}-deal-events-dlq"
+  message_retention_seconds = 1209600 # 14 days
+}
+
+resource "aws_sqs_queue" "deal_events" {
+  name                       = "${local.name}-deal-events"
+  visibility_timeout_seconds = 60
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.deal_events_dlq.arn
+    maxReceiveCount     = 5
+  })
+}
+
+# ── Sweeper IAM role (least-privilege: logs + SSM read + SQS send) ────────────
+resource "aws_iam_role" "sweeper" {
+  name               = "${local.name}-sweeper-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "sweeper_logs" {
+  role       = aws_iam_role.sweeper.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "sweeper_perms" {
+  name = "${local.name}-sweeper-perms"
+  role = aws_iam_role.sweeper.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:eu-west-1:${data.aws_caller_identity.current.account_id}:parameter/wcp/api/*"
+      },
+      { Effect = "Allow", Action = ["kms:Decrypt"], Resource = "*" },
+      { Effect = "Allow", Action = ["sqs:SendMessage"], Resource = aws_sqs_queue.deal_events.arn },
+    ]
+  })
+}
+
+# ── Sweeper Lambda ───────────────────────────────────────────────────────────
+data "archive_file" "sweeper" {
+  type        = "zip"
+  source_file = "${path.module}/../services/api/dist/sweeper.mjs"
+  output_path = "${path.module}/build/sweeper.zip"
+}
+
+resource "aws_cloudwatch_log_group" "sweeper" {
+  name              = "/aws/lambda/${local.name}-sweeper"
+  retention_in_days = 14
+}
+
+resource "aws_lambda_function" "sweeper" {
+  function_name    = "${local.name}-sweeper"
+  role             = aws_iam_role.sweeper.arn
+  runtime          = "nodejs22.x"
+  architectures    = ["arm64"]
+  handler          = "sweeper.handler"
+  filename         = data.archive_file.sweeper.output_path
+  source_code_hash = data.archive_file.sweeper.output_base64sha256
+  memory_size      = 256
+  timeout          = 50 # < the 60s cadence, so runs never overlap
+
+  environment {
+    variables = {
+      DATABASE_URL_SSM = "/wcp/api/database-url"
+      OUTBOX_QUEUE_URL = aws_sqs_queue.deal_events.url
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.sweeper]
+}
+
+# ── EventBridge: fire the sweeper every minute ───────────────────────────────
+resource "aws_cloudwatch_event_rule" "sweeper_tick" {
+  name                = "${local.name}-sweeper-tick"
+  schedule_expression = "rate(1 minute)"
+}
+
+resource "aws_cloudwatch_event_target" "sweeper" {
+  rule = aws_cloudwatch_event_rule.sweeper_tick.name
+  arn  = aws_lambda_function.sweeper.arn
+}
+
+resource "aws_lambda_permission" "sweeper_events" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.sweeper.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.sweeper_tick.arn
+}
