@@ -5,6 +5,7 @@ import {
   type BatchRelayer,
   type FireResult,
 } from "./deals/sweeper.js";
+import { reconcileAndRecord } from "./money/reconcile.js";
 
 /**
  * The sweeper Lambda — invoked every 60s by EventBridge. Fires due deal deadlines
@@ -49,10 +50,21 @@ export const handler = async () => {
     console.error("[sweeper] relayOutbox failed:", e);
   }
 
+  // Ledger reconciliation (the scheduled money-integrity check). Records drift
+  // durably; never blocks the timer/relay jobs.
+  let drift = "?";
+  try {
+    const r = await reconcileAndRecord(db);
+    drift = `${r.driftDeals.length}${r.globalBalanceKobo !== 0 ? " +GLOBAL" : ""}`;
+  } catch (e) {
+    errors.push(e);
+    console.error("[sweeper] reconcile failed:", e);
+  }
+
   console.log(
     `[sweeper] deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
       `skipped=${timers?.skipped ?? "?"} errored=${timers?.errored ?? "?"}; ` +
-      `outbox relayed=${relay.relayed} failed=${relay.failed}`,
+      `outbox relayed=${relay.relayed} failed=${relay.failed}; ledger drift=${drift}`,
   );
 
   if (errors.length) throw new AggregateError(errors, "[sweeper] one or more jobs failed");

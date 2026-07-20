@@ -3,7 +3,7 @@ import type { EscrowWebhook } from "@wcp/escrow";
 import type { AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import { transition, type Sql } from "../deals/commands.js";
-import { settleRefund } from "../money/ledger.js";
+import { settleRefund, settleRelease } from "../money/ledger.js";
 import { getEscrowProvider } from "../money/provider.js";
 
 /**
@@ -57,8 +57,10 @@ export function registerWebhooks(app: OpenAPIHono<AuthEnv>) {
     } else if (wh.type === "refund.settled") {
       // The refund ledger is written HERE (settlement), not at oversold time.
       await settleRefund(db, { dealId: wh.dealId, amountKobo: wh.amountKobo, providerRef: wh.providerRef });
+    } else if (wh.type === "release.settled") {
+      // The release ledger is written HERE (settlement), not at confirm time.
+      await settleRelease(db, { dealId: wh.dealId, providerRef: wh.providerRef });
     }
-    // release.settled → M5.
 
     return c.json({ ok: true }, 200);
   });

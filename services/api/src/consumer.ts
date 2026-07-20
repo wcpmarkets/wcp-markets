@@ -27,7 +27,12 @@ export const handler = async (event: SqsEvent) => {
   const batchItemFailures: { itemIdentifier: string }[] = [];
   for (const rec of event.Records) {
     try {
-      const msg = JSON.parse(rec.body) as { topic: string; dealId: string; amount?: number };
+      const msg = JSON.parse(rec.body) as {
+        topic: string;
+        dealId: string;
+        amount?: number;
+        payout?: number;
+      };
       if (msg.topic === "escrow.create_hold") {
         const txn = await provider.createHold({
           dealId: msg.dealId,
@@ -53,6 +58,19 @@ export const handler = async (event: SqsEvent) => {
           providerRef: txn.providerRef,
           dealId: msg.dealId,
           amountKobo: msg.amount!,
+        }));
+      } else if (msg.topic === "escrow.release") {
+        const txn = await provider.releaseToSeller({
+          dealId: msg.dealId,
+          amountKobo: msg.payout!,
+          idempotencyKey: `release:${msg.dealId}`,
+        });
+        await postWebhook(apiUrl, provider.buildWebhook({
+          eventId: `${txn.providerRef}:settled`,
+          type: "release.settled",
+          providerRef: txn.providerRef,
+          dealId: msg.dealId,
+          amountKobo: msg.payout!,
         }));
       }
       // else: not an escrow command — ack (delete) without action.

@@ -337,6 +337,95 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
     },
   );
 
+  // ── POST /deals/{id}/handoff — seller hands off a paid deal (M5) ─────────────
+  // PAID_IN_ESCROW → HANDED_OFF. Starts the 48h auto-release clock. Seller only.
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/deals/{id}/handoff",
+      summary: "Seller marks the item handed off",
+      tags: ["deals"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      request: { params: z.object({ id: z.string().uuid() }) },
+      responses: {
+        200: { description: "Handed off", content: { "application/json": { schema: DealSchema } } },
+        401: { description: "Unauthorized" },
+        404: { description: "Not found" },
+        409: { description: "Not in a handoff-able state", content: { "application/json": { schema: ErrorSchema } } },
+        503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
+      },
+    }),
+    async (c) => {
+      const user = c.get("user");
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const { id } = c.req.valid("param");
+      const [deal] = await db<{ buyer_id: string; seller_id: string }[]>`
+        select buyer_id, seller_id from public.deals where id = ${id}
+      `;
+      if (!deal || deal.seller_id !== user.sub) return c.json({ error: "not_found" }, 404);
+
+      const r = await transition(db, {
+        dealId: id,
+        actor: "SELLER",
+        actorId: user.sub,
+        action: "hand_off",
+        idempotencyKey: idem(c),
+      });
+      if (!r.ok) {
+        if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
+        return c.json({ error: r.code === "illegal" ? "illegal_transition" : "conflict" }, 409);
+      }
+      return c.json(toDeal(r.deal, user.sub), 200);
+    },
+  );
+
+  // ── POST /deals/{id}/confirm — buyer confirms receipt → release (M5) ────────
+  // HANDED_OFF → COMPLETED, enqueuing the escrow release (settles via webhook).
+  // Buyer only; the 48h timer does this automatically if the buyer stays silent.
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/deals/{id}/confirm",
+      summary: "Buyer confirms receipt (releases funds to the seller)",
+      tags: ["deals"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      request: { params: z.object({ id: z.string().uuid() }) },
+      responses: {
+        200: { description: "Confirmed — release initiated", content: { "application/json": { schema: DealSchema } } },
+        401: { description: "Unauthorized" },
+        404: { description: "Not found" },
+        409: { description: "Not in a confirmable state", content: { "application/json": { schema: ErrorSchema } } },
+        503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
+      },
+    }),
+    async (c) => {
+      const user = c.get("user");
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const { id } = c.req.valid("param");
+      const [deal] = await db<{ buyer_id: string; seller_id: string }[]>`
+        select buyer_id, seller_id from public.deals where id = ${id}
+      `;
+      if (!deal || deal.buyer_id !== user.sub) return c.json({ error: "not_found" }, 404);
+
+      const r = await transition(db, {
+        dealId: id,
+        actor: "BUYER",
+        actorId: user.sub,
+        action: "confirm_receipt",
+        idempotencyKey: idem(c),
+      });
+      if (!r.ok) {
+        if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
+        return c.json({ error: r.code === "illegal" ? "illegal_transition" : "conflict" }, 409);
+      }
+      return c.json(toDeal(r.deal, user.sub), 200);
+    },
+  );
+
   // ── GET /deals/{id}/messages ────────────────────────────────────────────────
   app.openapi(
     createRoute({
