@@ -56,10 +56,12 @@ export function registerWebhooks(app: OpenAPIHono<AuthEnv>) {
       if (!r.ok && r.code !== "idempotency_reuse") await recordException(db, wh, `payment_failed:${r.code}`);
     } else if (wh.type === "refund.settled") {
       // The refund ledger is written HERE (settlement), not at oversold time.
-      await settleRefund(db, { dealId: wh.dealId, amountKobo: wh.amountKobo, providerRef: wh.providerRef });
+      const r = await settleRefund(db, { dealId: wh.dealId, amountKobo: wh.amountKobo, providerRef: wh.providerRef });
+      if (!r.ok) await recordException(db, wh, `refund.settled:${r.reason}`);
     } else if (wh.type === "release.settled") {
       // The release ledger is written HERE (settlement), not at confirm time.
-      await settleRelease(db, { dealId: wh.dealId, providerRef: wh.providerRef });
+      const r = await settleRelease(db, { dealId: wh.dealId, providerRef: wh.providerRef, amountKobo: wh.amountKobo });
+      if (!r.ok) await recordException(db, wh, `release.settled:${r.reason}`);
     }
 
     return c.json({ ok: true }, 200);

@@ -52,10 +52,12 @@ export const handler = async () => {
 
   // Ledger reconciliation (the scheduled money-integrity check). Records drift
   // durably; never blocks the timer/relay jobs.
-  let drift = "?";
+  let recon = "?";
   try {
     const r = await reconcileAndRecord(db);
-    drift = `${r.driftDeals.length}${r.globalBalanceKobo !== 0 ? " +GLOBAL" : ""}`;
+    recon =
+      `drift=${r.driftDeals.length} overdue=${r.settlementOverdue.length} parked=${r.parkedOutbox}` +
+      (r.globalBalanceKobo !== 0 ? " +GLOBAL_IMBALANCE" : "");
   } catch (e) {
     errors.push(e);
     console.error("[sweeper] reconcile failed:", e);
@@ -64,7 +66,7 @@ export const handler = async () => {
   console.log(
     `[sweeper] deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
       `skipped=${timers?.skipped ?? "?"} errored=${timers?.errored ?? "?"}; ` +
-      `outbox relayed=${relay.relayed} failed=${relay.failed}; ledger drift=${drift}`,
+      `outbox relayed=${relay.relayed} failed=${relay.failed}; reconcile ${recon}`,
   );
 
   if (errors.length) throw new AggregateError(errors, "[sweeper] one or more jobs failed");

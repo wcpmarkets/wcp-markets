@@ -18,35 +18,58 @@ export type EffectCtx = {
   deal: DealRow;
   to: DealState; // the pre-redirect target
   seq: number; // this event's seq — ledger/outbox rows key to it
+  action: DealAction; // the requested action (for the refund/release reason)
   providerRef?: string; // the partner's real transaction ref (from the confirming webhook)
   confirmedAmountKobo?: number; // the amount the provider actually held
 };
 export type EffectResult = { redirectAction: DealAction } | void;
 export type Effect = (sql: Tx, ctx: EffectCtx) => Promise<EffectResult>;
 
-// Buyer confirms receipt, or the 48h timer auto-releases → release funds to the
-// seller, net of the 2% seller fee. No ledger here — the release ledger is written
-// on the release.settled webhook (symmetry with the hold).
-const releaseFunds: Effect = async (sql, { deal, seq }) => {
+function refundReason(action: DealAction, fromState: DealState): string {
+  switch (action) {
+    case "cancel_refund":
+      return "seller_cancel";
+    case "resolve_refund":
+      return "admin_refund";
+    case "auto_refund":
+      return fromState === "DISPUTED" ? "dispute_timeout" : "sla_lapse";
+    default:
+      return "refund";
+  }
+}
+
+// Buyer confirms receipt, the 48h timer auto-releases, or an admin resolves for the
+// seller → release funds net of the 2% seller fee. No ledger here — the release
+// ledger is written on the release.settled webhook (symmetry with the hold).
+const releaseFunds: Effect = async (sql, { deal, seq, action }) => {
   const principal = Number(deal.price_kobo);
   const sellerFee = sellerFeeKobo(principal);
+  const reason =
+    action === "resolve_release" ? "admin_release" : action === "auto_release" ? "auto_release" : "confirmed";
   await sql`
     insert into public.outbox (topic, payload, deal_id, event_seq)
     values ('escrow.release',
-      ${sql.json({ dealId: deal.id, seq, principal, sellerFee, payout: principal - sellerFee })},
+      ${sql.json({ dealId: deal.id, seq, principal, sellerFee, payout: principal - sellerFee, reason })},
       ${deal.id}, ${seq})
   `;
 };
 
-// Seller cancels, or the hand-off SLA lapses, on a paid-but-not-handed-off deal →
-// refund the buyer the full held amount (make-whole). Refund ledger on refund.settled.
-const refundBuyer: Effect = async (sql, { deal, seq }) => {
+// Seller cancels, the hand-off SLA lapses, a dispute times out, or an admin resolves
+// for the buyer → refund the buyer. Refund exactly what the hold booked (from the
+// ledger — the fee config may have changed since the hold), NOT a recomputation.
+// Refund ledger is written on the refund.settled webhook.
+const refundBuyer: Effect = async (sql, { deal, seq, action }) => {
+  const [held] = await sql<{ amount: string | null }[]>`
+    select (-sum(amount_kobo))::bigint as amount
+    from public.ledger_entries
+    where deal_id = ${deal.id} and movement = 'hold' and account = 'external'
+  `;
   const principal = Number(deal.price_kobo);
-  const amount = principal + buyerFeeKobo(principal);
+  const amount = held?.amount != null ? Number(held.amount) : principal + buyerFeeKobo(principal);
   await sql`
     insert into public.outbox (topic, payload, deal_id, event_seq)
     values ('escrow.refund',
-      ${sql.json({ dealId: deal.id, seq, amount, reason: "cancelled" })},
+      ${sql.json({ dealId: deal.id, seq, amount, reason: refundReason(action, deal.state) })},
       ${deal.id}, ${seq})
   `;
 };
@@ -103,4 +126,10 @@ export const EFFECTS: Partial<Record<DealAction, Effect>> = {
   auto_release: releaseFunds,
   cancel_refund: refundBuyer,
   auto_refund: refundBuyer,
+
+  // ── Dispute resolutions (M6) — wired now so an admin resolution can never move a
+  // funded deal to a terminal state without enqueuing the corresponding escrow
+  // command (unreachable until the dispute route exists, so this is inert today).
+  resolve_release: releaseFunds,
+  resolve_refund: refundBuyer,
 };

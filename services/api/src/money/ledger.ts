@@ -1,6 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type { Sql, Tx } from "../deals/commands.js";
-import { sellerFeeKobo } from "./fees.js";
+import { buyerFeeKobo, sellerFeeKobo } from "./fees.js";
+
+/** A settlement webhook either booked its ledger or was refused (recorded, not booked). */
+export type SettleResult = { ok: true } | { ok: false; reason: string };
+
+/** The amount the hold booked for a deal (principal + the fee actually captured),
+ * read back from the ledger so refunds reverse exactly what was held. */
+async function heldAmount(sql: Tx, dealId: string): Promise<number | null> {
+  const [r] = await sql<{ amount: string | null }[]>`
+    select (-sum(amount_kobo))::bigint as amount
+    from public.ledger_entries
+    where deal_id = ${dealId} and movement = 'hold' and account = 'external'
+  `;
+  return r?.amount != null ? Number(r.amount) : null;
+}
 
 /**
  * Double-entry ledger writers. Each writes ONE balanced txn_group (sum = 0, enforced
@@ -66,27 +80,28 @@ export async function writeRelease(
 
 /**
  * Settle a release when the partner confirms it (release.settled webhook) — written
- * HERE, not at confirm time, so the ledger only shows money that actually moved.
- * Idempotent via writeRelease's ON CONFLICT on provider_ref. Principal from the deal
- * (source of truth); seller fee is deterministic.
+ * HERE, not at confirm time. Fail-loud: refuses (records, doesn't book) if the deal
+ * is unknown, not COMPLETED (stops a double-spend before it happens rather than
+ * detecting it 60s later in reconcile), or the settled amount disagrees with the
+ * recomputed payout. Idempotent via writeRelease's ON CONFLICT on provider_ref.
  */
 export async function settleRelease(
   db: Sql,
-  p: { dealId: string; providerRef: string },
-): Promise<void> {
-  await db.begin(async (sql) => {
-    const [d] = await sql<{ price_kobo: string | number }[]>`
-      select price_kobo from public.deals where id = ${p.dealId}
+  p: { dealId: string; providerRef: string; amountKobo: number },
+): Promise<SettleResult> {
+  return db.begin(async (sql) => {
+    const [d] = await sql<{ state: string; price_kobo: string | number }[]>`
+      select state, price_kobo from public.deals where id = ${p.dealId}
     `;
-    if (!d) return;
+    if (!d) return { ok: false, reason: "unknown_deal" };
+    if (d.state !== "COMPLETED") return { ok: false, reason: `not_completed:${d.state}` };
     const principal = Number(d.price_kobo);
-    await writeRelease(sql, {
-      dealId: p.dealId,
-      seq: null,
-      principal,
-      sellerFee: sellerFeeKobo(principal),
-      providerRef: p.providerRef,
-    });
+    const sellerFee = sellerFeeKobo(principal);
+    const expectedPayout = principal - sellerFee;
+    if (p.amountKobo !== expectedPayout)
+      return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${expectedPayout}` };
+    await writeRelease(sql, { dealId: p.dealId, seq: null, principal, sellerFee, providerRef: p.providerRef });
+    return { ok: true };
   });
 }
 
@@ -100,13 +115,18 @@ export async function settleRelease(
 export async function settleRefund(
   db: Sql,
   p: { dealId: string; amountKobo: number; providerRef: string },
-): Promise<void> {
-  await db.begin(async (sql) => {
-    const [d] = await sql<{ price_kobo: string | number }[]>`
-      select price_kobo from public.deals where id = ${p.dealId}
+): Promise<SettleResult> {
+  return db.begin(async (sql) => {
+    const [d] = await sql<{ state: string; price_kobo: string | number }[]>`
+      select state, price_kobo from public.deals where id = ${p.dealId}
     `;
-    if (!d) return;
+    if (!d) return { ok: false, reason: "unknown_deal" };
+    if (d.state !== "REFUNDED") return { ok: false, reason: `not_refunded:${d.state}` };
     const principal = Number(d.price_kobo);
+    // The refund must reverse exactly what the hold booked.
+    const expected = (await heldAmount(sql, p.dealId)) ?? principal + buyerFeeKobo(principal);
+    if (p.amountKobo !== expected)
+      return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${expected}` };
     await writeRefund(sql, {
       dealId: p.dealId,
       seq: null,
@@ -114,5 +134,6 @@ export async function settleRefund(
       fee: p.amountKobo - principal,
       providerRef: p.providerRef,
     });
+    return { ok: true };
   });
 }

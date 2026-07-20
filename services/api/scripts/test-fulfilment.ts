@@ -6,6 +6,8 @@ import { createOffer, transition } from "../src/deals/commands.js";
 import { buyerFeeKobo, sellerFeeKobo } from "../src/money/fees.js";
 import { settleRefund, settleRelease } from "../src/money/ledger.js";
 import { reconcile } from "../src/money/reconcile.js";
+import { TRANSITIONS } from "../src/deals/machine.js";
+import { EFFECTS } from "../src/deals/effects.js";
 
 /**
  * M5 — fulfilment (hand-off → confirm → release/payout, + auto-release + cancel-refund)
@@ -67,6 +69,13 @@ async function main() {
   }
 
   try {
+    // Guard (Fable #2): every transition from a FUNDED state into a money-terminal
+    // state must have a money EFFECT, or an admin/timer resolution could strand funds.
+    const FUNDED = new Set(["PAID_IN_ESCROW", "HANDED_OFF", "DISPUTED"]);
+    const TERMINAL = new Set(["COMPLETED", "REFUNDED"]);
+    const missing = TRANSITIONS.filter((t) => FUNDED.has(t.from) && TERMINAL.has(t.to) && !EFFECTS[t.action]);
+    check("every funded→terminal transition has a money effect", missing.length === 0, missing.map((t) => `${t.from}/${t.action}`).join(", "));
+
     const P = 20_000_000; // ₦200,000
     const BFEE = buyerFeeKobo(P); // 100,000
     const SFEE = sellerFeeKobo(P); // 400,000
@@ -86,7 +95,7 @@ async function main() {
     // before settlement: only the hold group is booked
     check("pre-settle: escrow_holding still = principal", Number((await acct(a, "escrow_holding"))[0]!.s) === P);
 
-    await settleRelease(sql, { dealId: a, providerRef: `mock_rel_${a}` });
+    await settleRelease(sql, { dealId: a, providerRef: `mock_rel_${a}`, amountKobo: PAYOUT });
     const ga = await groups(a);
     check("post-settle: all ledger groups balanced (hold+release)", ga[0]!.n === 2 && ga[0]!.bad === 0, JSON.stringify(ga[0]));
     check("escrow_holding nets to 0 (released)", Number((await acct(a, "escrow_holding"))[0]!.s) === 0);
@@ -95,7 +104,7 @@ async function main() {
     check("external = -(principal + buyer fee)", Number((await acct(a, "external"))[0]!.s) === -(P + BFEE));
 
     // idempotent release settle
-    await settleRelease(sql, { dealId: a, providerRef: `mock_rel_${a}` });
+    await settleRelease(sql, { dealId: a, providerRef: `mock_rel_${a}`, amountKobo: PAYOUT });
     check("release settle idempotent (still 2 groups)", (await groups(a))[0]!.n === 2);
 
     // ── B) 48h auto-release: SYSTEM auto_release from HANDED_OFF → COMPLETED ─────
@@ -103,7 +112,7 @@ async function main() {
     await transition(sql, { dealId: b, actor: "SELLER", actorId: seller, action: "hand_off" });
     const ar = await transition(sql, { dealId: b, actor: "SYSTEM", action: "auto_release" });
     check("SYSTEM auto_release → COMPLETED", ar.ok && ar.deal.state === "COMPLETED", (ar as any).deal?.state);
-    await settleRelease(sql, { dealId: b, providerRef: `mock_rel_${b}` });
+    await settleRelease(sql, { dealId: b, providerRef: `mock_rel_${b}`, amountKobo: PAYOUT });
     check("auto-release: seller_payable = payout", Number((await acct(b, "seller_payable"))[0]!.s) === PAYOUT);
     check("auto-release: escrow_holding nets to 0", Number((await acct(b, "escrow_holding"))[0]!.s) === 0);
 
@@ -135,6 +144,31 @@ async function main() {
              (${grp}, ${a}, 'external', -500, 'hold', 'drift-probe')`;
     const r2 = await reconcile(sql);
     check("reconcile: injected drift on deal A is caught", r2.driftDeals.some((x) => x.dealId === a), JSON.stringify(r2.driftDeals.filter((x) => x.dealId === a)));
+
+    // ── E) settlement-lag (Fable #1): a TERMINAL deal with funds still in escrow past
+    // the grace window is flagged overdue — the stuck-payout blind spot invariant 2 misses.
+    // Insert a synthetic COMPLETED deal (backdated updated_at; the touch trigger is
+    // UPDATE-only, so an INSERT keeps our timestamp) with an unsettled hold.
+    const [sd] = await sql<{ id: string }[]>`
+      insert into public.deals (listing_id, buyer_id, seller_id, state, price_kobo, updated_at)
+      values (${listingId}, ${buyers[0]!}, ${seller}, 'COMPLETED', ${P}, now() - interval '30 minutes')
+      returning id`;
+    const lg = (await sql<{ g: string }[]>`select gen_random_uuid() as g`)[0]!.g;
+    await sql`
+      insert into public.ledger_entries (txn_group, deal_id, account, amount_kobo, movement, provider_ref)
+      values (${lg}, ${sd!.id}, 'escrow_holding', ${P}, 'hold', 'lag-probe'),
+             (${lg}, ${sd!.id}, 'external', ${-P}, 'hold', 'lag-probe')`;
+    const r3 = await reconcile(sql);
+    check("reconcile: overdue terminal deal flagged (escrow ∈ {0,P}, not drift)", r3.settlementOverdue.some((x) => x.dealId === sd!.id) && !r3.driftDeals.some((x) => x.dealId === sd!.id), JSON.stringify(r3.settlementOverdue.filter((x) => x.dealId === sd!.id)));
+
+    // ── F) fail-loud settlement (Fable #3): settling on a non-terminal deal is refused.
+    const g2 = await createOffer(sql, { listingId, buyerId: buyers[1]!, priceKobo: P, qty: 1 });
+    // dealB (buyers[1]) is already COMPLETED from part B, so this reuses buyers[1] on a
+    // fresh offer that's still OFFERED (non-terminal) — releasing on it must be refused.
+    if (g2.ok) {
+      const bad = await settleRelease(sql, { dealId: g2.deal.id, providerRef: "bad", amountKobo: P });
+      check("settleRelease on non-COMPLETED deal is refused", !bad.ok && bad.reason.startsWith("not_completed"), JSON.stringify(bad));
+    }
   } finally {
     await sql`delete from public.ledger_entries where deal_id in (select id from public.deals where seller_id = ${seller})`;
     await sql`delete from public.outbox where deal_id in (select id from public.deals where seller_id = ${seller})`;

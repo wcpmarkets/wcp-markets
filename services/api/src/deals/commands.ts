@@ -171,6 +171,7 @@ export async function transition(
         deal,
         to: to0,
         seq: next_seq,
+        action: p.action,
         providerRef: p.providerRef,
         confirmedAmountKobo: p.confirmedAmountKobo,
       });
