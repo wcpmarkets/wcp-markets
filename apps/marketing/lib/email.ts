@@ -23,7 +23,7 @@ export async function sendConfirmationEmail(p: { email: string; token: string })
       from: FROM,
       to: p.email,
       subject: "Confirm your spot on the WCP Markets waitlist",
-      html: html(url),
+      html: confirmationHtml(url),
       text: text(url),
     });
     if (error) {
@@ -52,7 +52,7 @@ function text(url: string): string {
 const FONT =
   "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
-function html(url: string): string {
+export function confirmationHtml(url: string): string {
   // Table-based + inline styles for email-client compatibility. LIGHT theme so it
   // renders consistently across every client (incl. the Gmail mobile app, which
   // ignores color-scheme and inverts dark emails). WCP brand carries via the logo
