@@ -7,6 +7,7 @@ import {
   DEADLINES,
   nextState,
 } from "./machine.js";
+import { EFFECTS } from "./effects.js";
 
 /**
  * The deal command handler — the deterministic transactional core. Every command
@@ -21,7 +22,7 @@ import {
  */
 
 export type Sql = postgres.Sql;
-type Tx = postgres.TransactionSql<Record<string, never>>;
+export type Tx = postgres.TransactionSql<Record<string, never>>;
 
 export type DealRow = {
   id: string;
@@ -132,12 +133,15 @@ export async function transition(
       // Safe under the row lock: request B blocks above until A commits, then sees
       // A's event (READ COMMITTED fresh snapshot). Same key + same action = replay;
       // same key + DIFFERENT action = client bug, refuse rather than silently no-op.
-      const [prior] = await sql<{ action: string }[]>`
-        select action from public.deal_events
+      // Match on requested_action (what the caller asked for) so an EFFECTS redirect
+      // — which records a DIFFERENT action (payment_confirmed → oversold) — still
+      // replays cleanly; fall back to action for pre-M4 rows without the column.
+      const [prior] = await sql<{ requested_action: string | null; action: string }[]>`
+        select requested_action, action from public.deal_events
         where deal_id = ${p.dealId} and idempotency_key = ${p.idempotencyKey} limit 1
       `;
       if (prior) {
-        if (prior.action !== p.action) return { ok: false, code: "idempotency_reuse" };
+        if ((prior.requested_action ?? prior.action) !== p.action) return { ok: false, code: "idempotency_reuse" };
         return { ok: true, deal, replay: true };
       }
     }
@@ -146,8 +150,28 @@ export async function transition(
       return { ok: false, code: "stale" }; // a user action already moved the deal
     }
 
-    const to = nextState(deal.state, p.actor, p.action);
-    if (!to) return { ok: false, code: "illegal", from: deal.state };
+    const to0 = nextState(deal.state, p.actor, p.action);
+    if (!to0) return { ok: false, code: "illegal", from: deal.state };
+
+    // seq is fixed before the effect so ledger/outbox rows can key to this event.
+    const seqRows = await sql<{ next_seq: number }[]>`
+      select coalesce(max(seq), 0) + 1 as next_seq from public.deal_events where deal_id = ${p.dealId}
+    `;
+    const next_seq = seqRows[0]!.next_seq;
+
+    // ── EFFECTS seam: run side effects in-tx; an effect may redirect the target ──
+    let action = p.action;
+    let to = to0;
+    const effect = EFFECTS[p.action];
+    if (effect) {
+      const res = await effect(sql, { deal, to: to0, seq: next_seq });
+      if (res?.redirectAction) {
+        action = res.redirectAction;
+        const rto = nextState(deal.state, p.actor, action);
+        if (!rto) throw new Error(`effect redirect ${p.action}->${action} illegal from ${deal.state}`);
+        to = rto;
+      }
+    }
 
     const newToken = randomUUID();
     const setPrice = p.priceKobo != null ? sql`, price_kobo = ${p.priceKobo}` : sql``;
@@ -160,21 +184,17 @@ export async function transition(
     `;
     if (updated.length === 0) return { ok: false, code: "conflict" };
 
-    const seqRows = await sql<{ next_seq: number }[]>`
-      select coalesce(max(seq), 0) + 1 as next_seq from public.deal_events where deal_id = ${p.dealId}
-    `;
-    const next_seq = seqRows[0]!.next_seq;
     await sql`
       insert into public.deal_events
-        (deal_id, seq, actor, actor_id, action, from_state, to_state, price_kobo, qty, reason, idempotency_key)
-      values (${p.dealId}, ${next_seq}, ${p.actor}, ${p.actorId ?? null}, ${p.action},
+        (deal_id, seq, actor, actor_id, action, requested_action, from_state, to_state, price_kobo, qty, reason, idempotency_key)
+      values (${p.dealId}, ${next_seq}, ${p.actor}, ${p.actorId ?? null}, ${action}, ${p.action},
               ${deal.state}, ${to}, ${p.priceKobo ?? null}, ${p.qty ?? null}, ${p.reason ?? null}, ${p.idempotencyKey ?? null})
     `;
     await syncDeadline(sql, p.dealId, to, newToken);
     await sql`
       insert into public.outbox (topic, payload, deal_id, event_seq)
       values ('deal.transition',
-        ${sql.json({ dealId: p.dealId, seq: next_seq, from: deal.state, to, actor: p.actor, action: p.action })},
+        ${sql.json({ dealId: p.dealId, seq: next_seq, from: deal.state, to, actor: p.actor, action })},
         ${p.dealId}, ${next_seq})
     `;
     return { ok: true, deal: updated[0]! };

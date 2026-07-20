@@ -289,6 +289,54 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
     },
   );
 
+  // ── POST /deals/{id}/pay — buyer pays an accepted offer (M4) ────────────────
+  // Moves ACCEPTED → PAYMENT_PENDING and enqueues an escrow hold (the EFFECTS seam).
+  // The provider confirms asynchronously via webhook → PAID_IN_ESCROW. Mock for now.
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/deals/{id}/pay",
+      summary: "Pay an accepted offer (opens the escrow hold)",
+      tags: ["deals"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      request: { params: z.object({ id: z.string().uuid() }) },
+      responses: {
+        200: { description: "Payment initiated", content: { "application/json": { schema: DealSchema } } },
+        401: { description: "Unauthorized" },
+        404: { description: "Not found" },
+        409: { description: "Not payable in this state", content: { "application/json": { schema: ErrorSchema } } },
+        503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
+      },
+    }),
+    async (c) => {
+      const user = c.get("user");
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const { id } = c.req.valid("param");
+      const [deal] = await db<{ buyer_id: string; seller_id: string }[]>`
+        select buyer_id, seller_id from public.deals where id = ${id}
+      `;
+      if (!deal || (deal.buyer_id !== user.sub && deal.seller_id !== user.sub))
+        return c.json({ error: "not_found" }, 404);
+      // Only the buyer pays.
+      if (deal.buyer_id !== user.sub) return c.json({ error: "not_found" }, 404);
+
+      const r = await transition(db, {
+        dealId: id,
+        actor: "BUYER",
+        actorId: user.sub,
+        action: "pay",
+        idempotencyKey: idem(c),
+      });
+      if (!r.ok) {
+        if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
+        return c.json({ error: r.code === "illegal" ? "not_payable" : "conflict" }, 409);
+      }
+      return c.json(toDeal(r.deal, user.sub), 200);
+    },
+  );
+
   // ── GET /deals/{id}/messages ────────────────────────────────────────────────
   app.openapi(
     createRoute({
