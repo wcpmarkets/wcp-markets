@@ -1,17 +1,19 @@
 import { randomUUID } from "node:crypto";
-import type { Tx } from "../deals/commands.js";
+import type { Sql, Tx } from "../deals/commands.js";
 
 /**
  * Double-entry ledger writers. Each writes ONE balanced txn_group (sum = 0, enforced
  * by the deferred DB trigger) inside the caller's transaction. Signed kobo: positive
- * credits the account. Called from the deal EFFECTS, so they inherit the transition's
- * idempotency (a replayed event never re-runs the effect).
+ * credits the account. `ON CONFLICT DO NOTHING` on the (deal_id, movement,
+ * provider_ref, account) idempotency index makes a redelivered settlement webhook a
+ * no-op (0 rows → the balance trigger doesn't fire), on top of the transition-layer
+ * idempotency the hold path already has.
  */
 
 /** Buyer pays principal + fee → funds captured into escrow, fee to WCP. */
 export async function writeHold(
   sql: Tx,
-  p: { dealId: string; seq: number; principal: number; fee: number; providerRef: string },
+  p: { dealId: string; seq: number | null; principal: number; fee: number; providerRef: string },
 ): Promise<void> {
   const grp = randomUUID();
   await sql`
@@ -20,13 +22,14 @@ export async function writeHold(
       (${grp}, ${p.dealId}, ${p.seq}, 'external',       ${-(p.principal + p.fee)}, 'hold', ${p.providerRef}),
       (${grp}, ${p.dealId}, ${p.seq}, 'escrow_holding', ${p.principal},            'hold', ${p.providerRef}),
       (${grp}, ${p.dealId}, ${p.seq}, 'wcp_fees',       ${p.fee},                  'hold', ${p.providerRef})
+    on conflict do nothing
   `;
 }
 
 /** Reverse a hold back to the buyer (oversold / dispute / seller-cancel). Full make-whole. */
 export async function writeRefund(
   sql: Tx,
-  p: { dealId: string; seq: number; principal: number; fee: number; providerRef: string },
+  p: { dealId: string; seq: number | null; principal: number; fee: number; providerRef: string },
 ): Promise<void> {
   const grp = randomUUID();
   await sql`
@@ -35,5 +38,33 @@ export async function writeRefund(
       (${grp}, ${p.dealId}, ${p.seq}, 'escrow_holding', ${-p.principal},         'refund', ${p.providerRef}),
       (${grp}, ${p.dealId}, ${p.seq}, 'wcp_fees',       ${-p.fee},               'refund', ${p.providerRef}),
       (${grp}, ${p.dealId}, ${p.seq}, 'external',       ${p.principal + p.fee},  'refund', ${p.providerRef})
+    on conflict do nothing
   `;
+}
+
+/**
+ * Settle a refund when the partner confirms it (refund.settled webhook) — the
+ * settlement ledger is written HERE, not optimistically at request time, so the
+ * ledger only ever shows money that actually moved. Idempotent via writeRefund's
+ * ON CONFLICT on provider_ref. The refunded amount = principal + buyer fee (the full
+ * held amount); fee is derived from what was actually refunded.
+ */
+export async function settleRefund(
+  db: Sql,
+  p: { dealId: string; amountKobo: number; providerRef: string },
+): Promise<void> {
+  await db.begin(async (sql) => {
+    const [d] = await sql<{ price_kobo: string | number }[]>`
+      select price_kobo from public.deals where id = ${p.dealId}
+    `;
+    if (!d) return;
+    const principal = Number(d.price_kobo);
+    await writeRefund(sql, {
+      dealId: p.dealId,
+      seq: null,
+      principal,
+      fee: p.amountKobo - principal,
+      providerRef: p.providerRef,
+    });
+  });
 }

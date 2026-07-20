@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import postgres from "postgres";
 import { fetchSsm } from "../src/secrets.js";
 import { createOffer, transition } from "../src/deals/commands.js";
-import { buyerFeeKobo } from "../src/money/fees.js";
+import { buyerFeeKobo, sellerFeeKobo, sellerPayoutKobo } from "../src/money/fees.js";
+import { settleRefund } from "../src/money/ledger.js";
 
 /**
  * M4 sub-step 1 — the money command layer against the cloud DB (no AWS): the
@@ -66,6 +67,10 @@ async function main() {
     sql<{ s: number }[]>`select coalesce(sum(amount_kobo),0)::bigint as s from public.ledger_entries where deal_id = ${dealId} and account = ${account}`;
 
   try {
+    // Fee floor cap (Fable #1): a sub-floor principal must not net a negative payout.
+    check("seller fee capped at principal on a tiny deal", sellerFeeKobo(5000) === 5000 && sellerPayoutKobo(5000) === 0, `${sellerFeeKobo(5000)}/${sellerPayoutKobo(5000)}`);
+    check("seller fee + payout == principal (no stray kobo)", sellerFeeKobo(333_333) + sellerPayoutKobo(333_333) === 333_333);
+
     const P = 20_000_000; // ₦200,000
     const FEE = buyerFeeKobo(P); // 0.5% → ₦1,000 (100,000 kobo)
     const [l] = await sql<{ id: string }[]>`
@@ -104,11 +109,21 @@ async function main() {
       select action, requested_action from public.deal_events where deal_id = ${dealB} order by seq desc limit 1
     `;
     check("event action=oversold, requested_action=payment_confirmed", evB!.action === "oversold" && evB!.requested_action === "payment_confirmed", `${evB!.action}/${evB!.requested_action}`);
-    const sumsB = await groupSums(dealB);
-    check("ledger: both groups (hold+refund) balance to 0", sumsB.length === 2 && sumsB.every((g) => Number(g.s) === 0), JSON.stringify(sumsB));
-    check("ledger: escrow_holding nets to 0 (hold+refund)", Number((await acct(dealB, "escrow_holding"))[0]!.s) === 0);
-    check("ledger: external nets to 0 (buyer made whole)", Number((await acct(dealB, "external"))[0]!.s) === 0);
     check("oversold enqueued escrow.refund", (await sql<{ n: number }[]>`select count(*)::int as n from public.outbox where deal_id = ${dealB} and topic = 'escrow.refund'`)[0]!.n === 1);
+    // At oversold time only the HOLD is booked (funds still with the provider); the
+    // refund ledger lands on the settlement webhook (Fable #4 — symmetry with hold).
+    check("at oversold: only the hold group exists (1)", (await groupSums(dealB)).length === 1);
+    check("at oversold: escrow_holding still = principal (not yet refunded)", Number((await acct(dealB, "escrow_holding"))[0]!.s) === P);
+
+    // Simulate refund.settled → write the refund ledger.
+    await settleRefund(sql, { dealId: dealB, amountKobo: P + FEE, providerRef: `mock_ref_${dealB}` });
+    const sumsB = await groupSums(dealB);
+    check("after settle: both groups (hold+refund) balance to 0", sumsB.length === 2 && sumsB.every((g) => Number(g.s) === 0), JSON.stringify(sumsB));
+    check("after settle: escrow_holding nets to 0", Number((await acct(dealB, "escrow_holding"))[0]!.s) === 0);
+    check("after settle: external nets to 0 (buyer made whole)", Number((await acct(dealB, "external"))[0]!.s) === 0);
+    // Redelivered refund.settled is idempotent (ON CONFLICT on provider_ref).
+    await settleRefund(sql, { dealId: dealB, amountKobo: P + FEE, providerRef: `mock_ref_${dealB}` });
+    check("refund settle is idempotent (still 2 groups)", (await groupSums(dealB)).length === 2);
     const [stockB] = await sql<{ stock: number }[]>`select stock from public.listings where id = ${listingId}`;
     check("stock still 0 (decremented exactly once across both pays)", stockB!.stock === 0, `${stockB!.stock}`);
 

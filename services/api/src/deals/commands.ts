@@ -121,6 +121,9 @@ export async function transition(
     idempotencyKey?: string;
     /** SYSTEM timers pass the token they were scheduled with; a mismatch = stale, skip. */
     expectedStateToken?: string;
+    /** From a confirming escrow webhook — passed to the effect for the ledger. */
+    providerRef?: string;
+    confirmedAmountKobo?: number;
   },
 ): Promise<CommandResult> {
   return db.begin(async (sql) => {
@@ -164,7 +167,13 @@ export async function transition(
     let to = to0;
     const effect = EFFECTS[p.action];
     if (effect) {
-      const res = await effect(sql, { deal, to: to0, seq: next_seq });
+      const res = await effect(sql, {
+        deal,
+        to: to0,
+        seq: next_seq,
+        providerRef: p.providerRef,
+        confirmedAmountKobo: p.confirmedAmountKobo,
+      });
       if (res?.redirectAction) {
         action = res.redirectAction;
         const rto = nextState(deal.state, p.actor, action);

@@ -1,7 +1,7 @@
 import type { DealRow, Tx } from "./commands.js";
 import type { DealAction, DealState } from "./machine.js";
 import { buyerFeeKobo } from "../money/fees.js";
-import { writeHold, writeRefund } from "../money/ledger.js";
+import { writeHold } from "../money/ledger.js";
 
 /**
  * Per-action side effects, run INSIDE the transition tx after the deal is locked and
@@ -10,11 +10,16 @@ import { writeHold, writeRefund } from "../money/ledger.js";
  * the destination (return a different action). No external/provider calls here (that
  * would put a network call inside the tx); effects enqueue outbox commands instead,
  * which the escrow orchestrator consumes.
+ *
+ * Settlement rows (refund/release) are written on the SETTLEMENT webhook, not here,
+ * so the ledger only ever reflects money that actually moved.
  */
 export type EffectCtx = {
   deal: DealRow;
   to: DealState; // the pre-redirect target
   seq: number; // this event's seq — ledger/outbox rows key to it
+  providerRef?: string; // the partner's real transaction ref (from the confirming webhook)
+  confirmedAmountKobo?: number; // the amount the provider actually held
 };
 export type EffectResult = { redirectAction: DealAction } | void;
 export type Effect = (sql: Tx, ctx: EffectCtx) => Promise<EffectResult>;
@@ -33,14 +38,21 @@ export const EFFECTS: Partial<Record<DealAction, Effect>> = {
     `;
   },
 
-  // Provider confirmed capture → record the hold, then decrement stock. If stock is
-  // gone (oversold race — two buyers paid for the last unit), reverse the hold, tell
-  // the orchestrator to refund, and redirect this deal to REFUNDED instead of
-  // PAID_IN_ESCROW. All atomic in this tx.
-  payment_confirmed: async (sql, { deal, seq }) => {
+  // Provider confirmed capture → record the hold using the provider's REAL ref and
+  // held amount (so the ledger matches custody and can be reconciled), then decrement
+  // stock. If stock is gone (oversold race), enqueue a refund and redirect to
+  // REFUNDED; the refund ledger is written when refund.settled arrives (symmetry).
+  payment_confirmed: async (sql, { deal, seq, providerRef, confirmedAmountKobo }) => {
     const principal = Number(deal.price_kobo);
-    const fee = buyerFeeKobo(principal);
-    await writeHold(sql, { dealId: deal.id, seq, principal, fee, providerRef: `hold:${deal.id}` });
+    const amountHeld = confirmedAmountKobo ?? principal + buyerFeeKobo(principal);
+    const fee = amountHeld - principal;
+    await writeHold(sql, {
+      dealId: deal.id,
+      seq,
+      principal,
+      fee,
+      providerRef: providerRef ?? `hold:${deal.id}`,
+    });
 
     const dec = await sql`
       update public.listings set stock = stock - ${deal.qty}
@@ -48,11 +60,10 @@ export const EFFECTS: Partial<Record<DealAction, Effect>> = {
       returning id
     `;
     if (dec.length === 0) {
-      await writeRefund(sql, { dealId: deal.id, seq, principal, fee, providerRef: `refund:oversold:${deal.id}` });
       await sql`
         insert into public.outbox (topic, payload, deal_id, event_seq)
         values ('escrow.refund',
-          ${sql.json({ dealId: deal.id, seq, amount: principal + fee, reason: "oversold" })},
+          ${sql.json({ dealId: deal.id, seq, amount: amountHeld, reason: "oversold" })},
           ${deal.id}, ${seq})
       `;
       return { redirectAction: "oversold" };
