@@ -11,7 +11,7 @@ const OPTIONS: {
   desc: string;
 }[] = [
   { value: "buy", label: "Buy", desc: "Shop with escrow protection on every deal" },
-  { value: "sell", label: "Sell", desc: "List items and get paid when buyers confirm" },
+  { value: "sell", label: "Sell", desc: "List it and get paid when confirmed" },
   { value: "both", label: "Both", desc: "I'll be buying and selling" },
 ];
 
