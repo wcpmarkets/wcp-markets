@@ -22,7 +22,7 @@ export const hero = {
   statusPill: "Trust & Opportunities · launching soon",
   headingLine1: "Buy and sell anything.",
   headingLine2: "Money held safe.",
-  sub: "WCP Markets is a marketplace for goods, property, vehicles and services — where every naira sits in escrow until you confirm the deal. Describe what you want in plain English; the AI finds it. No pay-and-pray.",
+  sub: "WCP Markets is a marketplace for goods, property, vehicles and services — where every naira sits in escrow until you confirm the deal. Describe what you want in your own words; the AI finds it, and your money stays locked until you're sure.",
   chips: [
     { icon: "🔒", label: "Escrow on every deal" },
     { icon: "✓", label: "Verified sellers" },
@@ -117,7 +117,7 @@ export const aiSearch = {
   heading: "Just say what you want.",
   body: "No dropdown archaeology. Describe it — by text, photo or voice — and WCP Markets' AI works out what you mean, applies the right filters, and shows you why each result matched. Selling is even easier: snap photos and the AI drafts your whole listing.",
   bullets: [
-    "Understands plain Nigerian English",
+    "Understands how Nigerians really type — pidgin, shorthand and typos",
     "Shows the filters it applied — change any of them",
     "Photos → a complete draft listing with a fair price",
   ],
