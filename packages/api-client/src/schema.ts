@@ -1643,10 +1643,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A seller's reviews and average rating */
+        /** A seller's reviews and average rating (paginated) */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    limit?: number;
+                    offset?: number | null;
+                };
                 header?: never;
                 path: {
                     id: string;
@@ -1884,8 +1887,6 @@ export interface components {
             /** Format: uuid */
             dealId: string;
             /** Format: uuid */
-            reviewerId: string;
-            /** Format: uuid */
             sellerId: string;
             rating: number;
             body: string | null;
@@ -1906,6 +1907,7 @@ export interface components {
             averageRating: number | null;
             count: number;
             reviews: components["schemas"]["Review"][];
+            nextOffset: number | null;
         };
     };
     responses: never;

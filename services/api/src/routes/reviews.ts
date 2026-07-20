@@ -9,11 +9,13 @@ import { getDb } from "../db.js";
  */
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 
+// NOTE: reviewerId is deliberately NOT exposed. Reviews are public + unauthenticated,
+// so a public reviewer id would let anyone scrape a buyer-UUID → purchase-history
+// graph. It stays in the DB (reviewer_id) for the gate/attribution only.
 const ReviewSchema = z
   .object({
     id: z.string().uuid(),
     dealId: z.string().uuid(),
-    reviewerId: z.string().uuid(),
     sellerId: z.string().uuid(),
     rating: z.number().int().min(1).max(5),
     body: z.string().nullable(),
@@ -35,6 +37,7 @@ const SellerReviewsSchema = z
     averageRating: z.number().nullable(),
     count: z.number().int(),
     reviews: z.array(ReviewSchema),
+    nextOffset: z.number().int().nullable(),
   })
   .openapi("SellerReviews");
 
@@ -55,7 +58,6 @@ function toReview(r: Row): z.infer<typeof ReviewSchema> {
   return {
     id: r.id,
     dealId: r.deal_id,
-    reviewerId: r.reviewer_id,
     sellerId: r.seller_id,
     rating: r.rating,
     body: r.body,
@@ -188,9 +190,15 @@ export function registerReviews(app: OpenAPIHono<AuthEnv>) {
     createRoute({
       method: "get",
       path: "/sellers/{id}/reviews",
-      summary: "A seller's reviews and average rating",
+      summary: "A seller's reviews and average rating (paginated)",
       tags: ["reviews"],
-      request: { params: z.object({ id: z.string().uuid() }) },
+      request: {
+        params: z.object({ id: z.string().uuid() }),
+        query: z.object({
+          limit: z.coerce.number().int().min(1).max(50).optional(),
+          offset: z.coerce.number().int().min(0).optional(),
+        }),
+      },
       responses: {
         200: { description: "Seller reviews", content: { "application/json": { schema: SellerReviewsSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
@@ -200,13 +208,29 @@ export function registerReviews(app: OpenAPIHono<AuthEnv>) {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const { id } = c.req.valid("param");
-      const rows = await db<Row[]>`
-        select ${db.unsafe(SELECT)} from public.reviews where seller_id = ${id} order by created_at desc
+      const limit = c.req.valid("query").limit ?? 20;
+      const offset = c.req.valid("query").offset ?? 0;
+      // Aggregate in SQL over the full set; page the rows.
+      const [agg] = await db<{ avg: string | null; count: number }[]>`
+        select avg(rating)::numeric(3,1) as avg, count(*)::int as count
+        from public.reviews where seller_id = ${id}
       `;
-      const count = rows.length;
-      const averageRating =
-        count === 0 ? null : Math.round((rows.reduce((s, r) => s + r.rating, 0) / count) * 10) / 10;
-      return c.json({ sellerId: id, averageRating, count, reviews: rows.map(toReview) }, 200);
+      const rows = await db<Row[]>`
+        select ${db.unsafe(SELECT)} from public.reviews
+        where seller_id = ${id} order by created_at desc
+        limit ${limit} offset ${offset}
+      `;
+      const count = agg!.count;
+      return c.json(
+        {
+          sellerId: id,
+          averageRating: agg!.avg == null ? null : Number(agg!.avg),
+          count,
+          reviews: rows.map(toReview),
+          nextOffset: offset + rows.length < count ? offset + limit : null,
+        },
+        200,
+      );
     },
   );
 }

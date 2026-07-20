@@ -89,11 +89,23 @@ async function main() {
     check("seller can reply once", ar!.seller_reply === "thank you");
     check("a posted reply cannot be edited", await rejects(() => sql`update public.reviews set seller_reply = 'edited' where deal_id = ${completed}`));
 
+    // ── Hardening (Fable review) ───────────────────────────────────────────────
+    check("replied_at can't be back-dated on its own",
+      await rejects(() => sql`update public.reviews set replied_at = now() - interval '10 days' where deal_id = ${completed}`));
+    check("id is immutable",
+      await rejects(() => sql`update public.reviews set id = gen_random_uuid() where deal_id = ${completed}`));
+    check("review DELETE is blocked without the erasure GUC",
+      await rejects(() => sql`delete from public.reviews where deal_id = ${completed}`));
+
     // ── Aggregate ──────────────────────────────────────────────────────────────
     const [agg] = await sql<{ n: number; avg: number }[]>`select count(*)::int as n, avg(rating)::float as avg from public.reviews where seller_id = ${seller}`;
     check("seller aggregate: 1 review, avg 5", agg!.n === 1 && agg!.avg === 5, `${agg!.n}/${agg!.avg}`);
   } finally {
-    await sql`delete from public.reviews where seller_id = ${seller}`;
+    // Deliberate erasure: set the GUC in-tx (the no_delete trigger requires it).
+    await sql.begin(async (tx) => {
+      await tx`select set_config('wcp.allow_review_erasure', 'on', true)`;
+      await tx`delete from public.reviews where seller_id = ${seller}`;
+    });
     await sql`delete from public.ledger_entries where deal_id in (select id from public.deals where seller_id = ${seller})`;
     await sql`delete from public.outbox where deal_id in (select id from public.deals where seller_id = ${seller})`;
     await sql`delete from public.deals where seller_id = ${seller}`;

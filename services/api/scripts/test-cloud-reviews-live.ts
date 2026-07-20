@@ -76,12 +76,18 @@ async function main() {
 
     // public reads (no auth)
     const pub = await fetch(`${API}/deals/${deal.id}/review`);
-    check("public GET /deals/{id}/review (no auth) → 200 with reply", pub.status === 200 && ((await pub.json()) as { sellerReply: string }).sellerReply === "thanks!");
+    const pubReview = (await pub.json()) as Record<string, unknown>;
+    check("public GET /deals/{id}/review (no auth) → 200 with reply", pub.status === 200 && pubReview.sellerReply === "thanks!");
+    check("public review payload does NOT leak reviewerId", !("reviewerId" in pubReview));
     const sr = await fetch(`${API}/sellers/${seller.id}/reviews`);
-    const agg = (await sr.json()) as { count: number; averageRating: number };
-    check("seller reviews aggregate: count 1, avg 5", sr.status === 200 && agg.count === 1 && agg.averageRating === 5, `${agg.count}/${agg.averageRating}`);
+    const agg = (await sr.json()) as { count: number; averageRating: number; nextOffset: number | null; reviews: Record<string, unknown>[] };
+    check("seller reviews aggregate: count 1, avg 5, paginated", sr.status === 200 && agg.count === 1 && agg.averageRating === 5 && agg.nextOffset === null, `${agg.count}/${agg.averageRating}`);
+    check("seller reviews list also hides reviewerId", (agg.reviews[0] && !("reviewerId" in agg.reviews[0])) ?? false);
   } finally {
-    await sql`delete from public.reviews where seller_id = ${seller.id}`;
+    await sql.begin(async (tx) => {
+      await tx`select set_config('wcp.allow_review_erasure', 'on', true)`;
+      await tx`delete from public.reviews where seller_id = ${seller.id}`;
+    });
     await sql`delete from public.ledger_entries where deal_id in (select id from public.deals where seller_id = ${seller.id})`;
     await sql`delete from public.outbox where deal_id in (select id from public.deals where seller_id = ${seller.id})`;
     await sql`delete from public.deals where seller_id = ${seller.id}`;
