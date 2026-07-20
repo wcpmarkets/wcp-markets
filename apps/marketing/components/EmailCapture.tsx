@@ -18,7 +18,7 @@ export function EmailCapture({
   source: "hero" | "waitlist";
   align?: "start" | "center";
 }) {
-  const { email, setEmail, joined, error, clearError, requestJoin } =
+  const { email, setEmail, joined, joinedMessage, error, clearError, requestJoin } =
     useWaitlist();
 
   // After joining, both the hero and the waitlist section show the same chip.
@@ -29,7 +29,7 @@ export function EmailCapture({
           <span className="text-[16px] text-brand-cyan" aria-hidden="true">
             ✓
           </span>
-          {waitlistNotes.successChip}
+          {joinedMessage}
         </div>
       </div>
     );

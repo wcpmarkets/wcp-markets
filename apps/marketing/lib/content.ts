@@ -184,9 +184,11 @@ export const waitlistSection = {
 
 export const waitlistNotes = {
   notJoined: "Join others already waiting.",
-  // Shown (with a ✓) in both the hero and waitlist section after joining. Only
-  // promises an email at launch — we don't send confirmation emails yet.
-  successChip: "You’re on the list — we’ll email you the moment doors open.",
+  // Shown (with a ✓) in both the hero and waitlist section after joining. Double
+  // opt-in: we email a confirm link, so the success state points to the inbox.
+  successChip: "Almost there — check your inbox to confirm your spot.",
+  // Shown instead when the email was already confirmed on a previous signup.
+  alreadyConfirmed: "You’re already confirmed — see you at launch.",
 } as const;
 
 export const footer = {

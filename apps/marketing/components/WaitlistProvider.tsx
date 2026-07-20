@@ -12,6 +12,7 @@ import {
 import { track } from "@wcp/analytics";
 import { joinWaitlist } from "@/app/actions/waitlist";
 import type { WaitlistIntent } from "@/lib/waitlist";
+import { waitlistNotes } from "@/lib/content";
 
 /**
  * Shared waitlist state (F-1). One provider wraps the page so the hero and the
@@ -25,6 +26,8 @@ type WaitlistContextValue = {
   email: string;
   setEmail: (value: string) => void;
   joined: boolean;
+  /** Success copy to show once joined — differs for a just-confirmed vs already-confirmed email. */
+  joinedMessage: string;
   submitting: boolean;
   error: string | null;
   clearError: () => void;
@@ -40,6 +43,7 @@ const WaitlistContext = createContext<WaitlistContextValue | null>(null);
 export function WaitlistProvider({ children }: { children: ReactNode }) {
   const [email, setEmail] = useState("");
   const [joined, setJoined] = useState(false);
+  const [joinedMessage, setJoinedMessage] = useState<string>(waitlistNotes.successChip);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -84,12 +88,16 @@ export function WaitlistProvider({ children }: { children: ReactNode }) {
       try {
         const res = await joinWaitlist({ email, intent: value });
         if (res.ok) {
+          setJoinedMessage(
+            res.alreadyConfirmed ? waitlistNotes.alreadyConfirmed : waitlistNotes.successChip,
+          );
           setJoined(true);
           setDialogOpen(false);
           track("waitlist_success", {
             source,
             intent: value,
             duplicate: res.duplicate,
+            already_confirmed: res.alreadyConfirmed,
           });
         } else {
           setSubmitError("Something went wrong — please try again");
@@ -108,6 +116,7 @@ export function WaitlistProvider({ children }: { children: ReactNode }) {
       email,
       setEmail,
       joined,
+      joinedMessage,
       submitting,
       error,
       clearError,
@@ -120,6 +129,7 @@ export function WaitlistProvider({ children }: { children: ReactNode }) {
     [
       email,
       joined,
+      joinedMessage,
       submitting,
       error,
       clearError,
