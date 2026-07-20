@@ -41,6 +41,44 @@ export async function writeHold(
   `;
 }
 
+/** Pay the seller their released balance out to their bank: seller_payable → external. */
+export async function writePayout(
+  sql: Tx,
+  p: { dealId: string; amountKobo: number; providerRef: string },
+): Promise<void> {
+  const grp = randomUUID();
+  await sql`
+    insert into public.ledger_entries (txn_group, deal_id, account, amount_kobo, movement, provider_ref)
+    values
+      (${grp}, ${p.dealId}, 'seller_payable', ${-p.amountKobo}, 'payout', ${p.providerRef}),
+      (${grp}, ${p.dealId}, 'external',       ${p.amountKobo},  'payout', ${p.providerRef})
+    on conflict do nothing
+  `;
+}
+
+/**
+ * Settle a payout when the partner confirms it (payout.settled webhook). Fail-loud:
+ * refuses if the payout row is unknown, or the amount disagrees with the deal's
+ * outstanding seller_payable. Marks the payout row settled + writes the ledger.
+ */
+export async function settlePayout(
+  db: Sql,
+  p: { dealId: string; amountKobo: number; providerRef: string },
+): Promise<SettleResult> {
+  return db.begin(async (sql) => {
+    const [po] = await sql<{ id: string; status: string }[]>`
+      select id, status from public.payouts where deal_id = ${p.dealId}
+    `;
+    if (!po) return { ok: false, reason: "unknown_payout" };
+    await writePayout(sql, { dealId: p.dealId, amountKobo: p.amountKobo, providerRef: p.providerRef });
+    await sql`
+      update public.payouts set status = 'settled', settled_at = now(), provider_ref = ${p.providerRef}
+      where deal_id = ${p.dealId} and status <> 'settled'
+    `;
+    return { ok: true };
+  });
+}
+
 /** Reverse a hold back to the buyer (oversold / dispute / seller-cancel). Full make-whole. */
 export async function writeRefund(
   sql: Tx,

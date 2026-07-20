@@ -6,6 +6,7 @@ import { registerListings } from "./routes/listings.js";
 import { registerDeals } from "./routes/deals.js";
 import { registerDisputes } from "./routes/disputes.js";
 import { registerReviews } from "./routes/reviews.js";
+import { registerKyc } from "./routes/kyc.js";
 import { registerWebhooks } from "./routes/webhooks.js";
 
 /**
@@ -182,6 +183,9 @@ export function createApp() {
 
   // ── Reviews (M7 — escrow-gated) ───────────────────────────────────────────
   registerReviews(app);
+
+  // ── KYC + payouts (M8 — payout-gated on L2) ───────────────────────────────
+  registerKyc(app);
 
   // ── Escrow webhooks (M4) — raw signed endpoint, not in the client contract ──
   registerWebhooks(app);

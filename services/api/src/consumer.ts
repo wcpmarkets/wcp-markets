@@ -72,6 +72,19 @@ export const handler = async (event: SqsEvent) => {
           dealId: msg.dealId,
           amountKobo: msg.payout!,
         }));
+      } else if (msg.topic === "escrow.payout") {
+        const txn = await provider.payoutToSeller({
+          dealId: msg.dealId,
+          amountKobo: msg.amount!,
+          idempotencyKey: `payout:${msg.dealId}`,
+        });
+        await postWebhook(apiUrl, provider.buildWebhook({
+          eventId: `${txn.providerRef}:settled`,
+          type: "payout.settled",
+          providerRef: txn.providerRef,
+          dealId: msg.dealId,
+          amountKobo: msg.amount!,
+        }));
       }
       // else: not an escrow command — ack (delete) without action.
     } catch (e) {

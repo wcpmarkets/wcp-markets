@@ -3,7 +3,7 @@ import type { EscrowWebhook } from "@wcp/escrow";
 import type { AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import { transition, type Sql } from "../deals/commands.js";
-import { settleRefund, settleRelease } from "../money/ledger.js";
+import { settlePayout, settleRefund, settleRelease } from "../money/ledger.js";
 import { getEscrowProvider } from "../money/provider.js";
 
 /**
@@ -62,6 +62,10 @@ export function registerWebhooks(app: OpenAPIHono<AuthEnv>) {
       // The release ledger is written HERE (settlement), not at confirm time.
       const r = await settleRelease(db, { dealId: wh.dealId, providerRef: wh.providerRef, amountKobo: wh.amountKobo });
       if (!r.ok) await recordException(db, wh, `release.settled:${r.reason}`);
+    } else if (wh.type === "payout.settled") {
+      // seller_payable → external (money out to the seller's bank).
+      const r = await settlePayout(db, { dealId: wh.dealId, amountKobo: wh.amountKobo, providerRef: wh.providerRef });
+      if (!r.ok) await recordException(db, wh, `payout.settled:${r.reason}`);
     }
 
     return c.json({ ok: true }, 200);

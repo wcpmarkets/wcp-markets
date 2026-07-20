@@ -21,6 +21,9 @@ export class MockEscrowProvider implements EscrowProvider {
   async releaseToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn> {
     return { providerRef: this.ref("rel", p.dealId), dealId: p.dealId, amountKobo: p.amountKobo, status: "released" };
   }
+  async payoutToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn> {
+    return { providerRef: this.ref("pay", p.dealId), dealId: p.dealId, amountKobo: p.amountKobo, status: "released" };
+  }
   async refundToBuyer(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn> {
     return { providerRef: this.ref("ref", p.dealId), dealId: p.dealId, amountKobo: p.amountKobo, status: "refunded" };
   }

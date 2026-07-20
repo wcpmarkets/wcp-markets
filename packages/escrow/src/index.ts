@@ -20,7 +20,7 @@ export type EscrowTxn = {
 /** A normalized inbound webhook (after signature verification + parsing). */
 export type EscrowWebhook = {
   eventId: string; // provider's unique event id → our idempotency_key
-  type: "hold.confirmed" | "hold.failed" | "release.settled" | "refund.settled";
+  type: "hold.confirmed" | "hold.failed" | "release.settled" | "refund.settled" | "payout.settled";
   providerRef: string;
   dealId: string;
   amountKobo: number;
@@ -31,6 +31,8 @@ export interface EscrowProvider {
   createHold(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn>;
   /** Release held funds to the seller (net of fee). Settlement arrives by webhook. */
   releaseToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn>;
+  /** Pay out the seller's balance to their bank (L2-gated upstream). Settles by webhook. */
+  payoutToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn>;
   /** Refund held funds to the buyer. Settlement arrives by webhook. */
   refundToBuyer(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn>;
   /** Look up a transaction (reconciliation). */
