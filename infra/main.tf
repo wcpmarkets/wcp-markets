@@ -228,7 +228,9 @@ resource "aws_lambda_function" "sweeper" {
   filename         = data.archive_file.sweeper.output_path
   source_code_hash = data.archive_file.sweeper.output_base64sha256
   memory_size      = 256
-  timeout          = 50 # < the 60s cadence, so runs never overlap
+  timeout          = 50 # < the 60s cadence to keep a run short; overlap is still
+  # possible (EventBridge→Lambda is async + at-least-once) but the sweeper's jobs are
+  # safe under concurrent runs (FOR UPDATE + state_token fence; SKIP LOCKED relay).
 
   environment {
     variables = {
@@ -238,6 +240,13 @@ resource "aws_lambda_function" "sweeper" {
   }
 
   depends_on = [aws_cloudwatch_log_group.sweeper]
+}
+
+# Async invokes: don't let the Lambda service retry a throwing run — the next tick is
+# 60s away and a retry only adds an overlapping run.
+resource "aws_lambda_function_event_invoke_config" "sweeper" {
+  function_name          = aws_lambda_function.sweeper.function_name
+  maximum_retry_attempts = 0
 }
 
 # ── EventBridge: fire the sweeper every minute ───────────────────────────────
@@ -257,4 +266,54 @@ resource "aws_lambda_permission" "sweeper_events" {
   function_name = aws_lambda_function.sweeper.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.sweeper_tick.arn
+}
+
+# ── Alerting: the sweeper must never fail silently ───────────────────────────
+# A silent/stopped sweeper freezes every escrow timer with a green dashboard — the
+# single most dangerous failure mode. Two alarms cover it: it errored, and it stopped
+# running at all. Both notify an email via SNS.
+resource "aws_sns_topic" "alerts" {
+  name = "${local.name}-alerts"
+}
+
+resource "aws_sns_topic_subscription" "alerts_email" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+# (1) The sweeper threw at least once in the last minute.
+resource "aws_cloudwatch_metric_alarm" "sweeper_errors" {
+  alarm_name          = "${local.name}-sweeper-errors"
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  dimensions          = { FunctionName = aws_lambda_function.sweeper.function_name }
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_description    = "Sweeper Lambda threw — a timer/relay run failed."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+}
+
+# (2) The sweeper stopped running (disabled rule, bad deploy, IAM drift). No
+# invocations produces NO datapoints, so treat_missing_data must be "breaching" or
+# this never fires — the part everyone forgets.
+resource "aws_cloudwatch_metric_alarm" "sweeper_not_running" {
+  alarm_name          = "${local.name}-sweeper-not-running"
+  namespace           = "AWS/Lambda"
+  metric_name         = "Invocations"
+  dimensions          = { FunctionName = aws_lambda_function.sweeper.function_name }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+  alarm_description    = "Sweeper has not run in 5 minutes — escrow timers are frozen."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
 }

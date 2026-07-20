@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import postgres from "postgres";
 import { fetchSsm } from "../src/secrets.js";
 import { createOffer, transition } from "../src/deals/commands.js";
-import { fireDueDeadlines, relayOutbox, type OutboxMessage } from "../src/deals/sweeper.js";
+import { fireDueDeadlines, relayOutbox, OUTBOX_MAX_ATTEMPTS, type OutboxMessage } from "../src/deals/sweeper.js";
 
 /**
  * Sweeper core against the cloud DB (no AWS needed): backdate deadlines and prove
@@ -86,20 +86,36 @@ async function main() {
     const [dl2] = await sql<{ n: number }[]>`select count(*)::int as n from public.deal_deadlines where deal_id = ${d2}`;
     check("fresh future deadline still present", (dl2 as any).n === 1 || dl2!.n === 1, JSON.stringify(dl2));
 
-    // C) outbox relay — stub sender marks rows relayed; a failing send bumps attempts
+    // C) outbox relay — stub batch sender marks rows relayed; a failing send bumps attempts
     const before = await sql<{ n: number }[]>`select count(*)::int as n from public.outbox where relayed_at is null and deal_id in (${d1}, ${d2})`;
     const sent: OutboxMessage[] = [];
-    const okRelay = await relayOutbox(sql, async (m) => { sent.push(m); });
+    const okRelay = await relayOutbox(sql, async (msgs) => {
+      sent.push(...msgs);
+      return { okIds: msgs.map((m) => m.id), failed: [] };
+    });
     check("relay marked all unrelayed rows", okRelay.relayed >= (before[0]?.n ?? 0) && okRelay.failed === 0, JSON.stringify(okRelay));
     check("stub sender received messages with topic+payload", sent.length > 0 && !!sent[0]!.topic);
 
-    // failing sender: create one more outbox row, relay with a thrower
+    // failing sender: create one more outbox row, relay with an all-fail batch
     const g3 = await createOffer(sql, { listingId: l!.id, buyerId: buyer3, priceKobo: 16000000, qty: 1 });
     if (g3.ok) {
-      const failRelay = await relayOutbox(sql, async () => { throw new Error("sqs down"); });
+      const failRelay = await relayOutbox(sql, async (msgs) => ({
+        okIds: [],
+        failed: msgs.map((m) => ({ id: m.id, error: "sqs down" })),
+      }));
       check("failing send → counted failed, none marked relayed", failRelay.relayed === 0 && failRelay.failed >= 1, JSON.stringify(failRelay));
       const [att] = await sql<{ attempts: number }[]>`select attempts from public.outbox where deal_id = ${g3.deal.id} order by id desc limit 1`;
       check("failed row has attempts ≥ 1 (visible poison)", (att?.attempts ?? 0) >= 1, `${att?.attempts}`);
+
+      // D) poison cap: a row at max attempts is SKIPPED, so it can't wedge the head
+      await sql`update public.outbox set attempts = ${OUTBOX_MAX_ATTEMPTS} where deal_id = ${g3.deal.id}`;
+      const seen: number[] = [];
+      await relayOutbox(sql, async (msgs) => {
+        seen.push(...msgs.map((m) => m.id));
+        return { okIds: msgs.map((m) => m.id), failed: [] };
+      });
+      const [poison] = await sql<{ id: number }[]>`select id from public.outbox where deal_id = ${g3.deal.id} and relayed_at is null order by id desc limit 1`;
+      check("row at max attempts is skipped (not relayed)", !!poison && !seen.includes(Number(poison.id)), `id=${poison?.id}`);
     }
   } finally {
     await sql`delete from public.outbox where deal_id in (select id from public.deals where seller_id = ${seller})`;
