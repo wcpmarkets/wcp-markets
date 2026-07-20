@@ -53,25 +53,30 @@ const FONT =
   "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
 function html(url: string): string {
-  // Table-based + inline styles for email-client compatibility, committed to the
-  // WCP dark theme (canvas #0B0D11 / panel #12151C, purple #7C5CFF → cyan #22D3EE
-  // gradient, ink #EAEDF2). Gradients get a solid fallback so Outlook stays legible;
-  // color-scheme hints keep clients from auto-inverting the dark design.
-  const logo = `${SITE_URL}/wcp-logomark.png`;
+  // Table-based + inline styles for email-client compatibility. LIGHT theme so it
+  // renders consistently across every client (incl. the Gmail mobile app, which
+  // ignores color-scheme and inverts dark emails). WCP brand carries via the logo
+  // chip, the purple #7C5CFF → cyan #22D3EE gradient hairline + CTA, and accents.
+  // Gradients get a solid fallback so Outlook stays legible.
+  //
+  // The logo chip is a BAKED image (dark square + white logomark composited): Gmail
+  // dark mode recolors CSS backgrounds but never image pixels, so a baked chip stays
+  // near-black with the white mark visible in BOTH light and dark modes.
+  const chip = `${SITE_URL}/wcp-logo-chip.png`;
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="supported-color-schemes" content="dark" />
+    <meta name="color-scheme" content="light" />
+    <meta name="supported-color-schemes" content="light" />
   </head>
-  <body style="margin:0;padding:0;background-color:#0B0D11;">
-    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#0B0D11;">One tap to lock in early access to WCP Markets.</div>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0B0D11;">
+  <body style="margin:0;padding:0;background-color:#EEF0F4;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#EEF0F4;">One tap to lock in early access to WCP Markets.</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#EEF0F4;">
       <tr>
         <td align="center" style="padding:40px 16px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#12151C;border:1px solid #232838;border-radius:18px;overflow:hidden;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#FFFFFF;border:1px solid #E4E7EC;border-radius:18px;overflow:hidden;">
             <tr>
               <td style="height:3px;background-color:#7C5CFF;background:linear-gradient(120deg,#7C5CFF,#22D3EE);font-size:0;line-height:0;">&nbsp;</td>
             </tr>
@@ -79,18 +84,18 @@ function html(url: string): string {
               <td align="center" style="padding:36px 40px 0;">
                 <table role="presentation" cellpadding="0" cellspacing="0" align="center">
                   <tr>
-                    <td style="padding-right:9px;vertical-align:middle;">
-                      <img src="${logo}" width="26" height="29" alt="WCP Markets" style="display:block;height:29px;width:auto;border:0;outline:none;" />
+                    <td style="padding-right:11px;vertical-align:middle;">
+                      <img src="${chip}" width="40" height="40" alt="WCP Markets" style="display:block;width:40px;height:40px;border:0;outline:none;border-radius:11px;" />
                     </td>
-                    <td style="vertical-align:middle;font-family:${FONT};font-size:19px;font-weight:700;letter-spacing:-0.3px;color:#EAEDF2;">WCP&nbsp;Markets</td>
+                    <td style="vertical-align:middle;font-family:${FONT};font-size:19px;font-weight:700;letter-spacing:-0.3px;color:#14171F;">WCP&nbsp;Markets</td>
                   </tr>
                 </table>
               </td>
             </tr>
             <tr>
-              <td align="center" style="padding:26px 40px 0;font-family:${FONT};">
-                <h1 style="margin:0;font-size:23px;line-height:1.3;font-weight:700;color:#EAEDF2;">Confirm your spot on the&nbsp;waitlist</h1>
-                <p style="margin:14px 0 0;font-size:15px;line-height:1.65;color:#C6CCD8;">You're one tap from early access to Nigeria's escrow-backed marketplace &mdash; plus verified-seller onboarding before the crowd arrives.</p>
+              <td align="center" style="padding:28px 40px 0;font-family:${FONT};">
+                <h1 style="margin:0;font-size:23px;line-height:1.3;font-weight:700;color:#14171F;">Confirm your spot on the&nbsp;waitlist</h1>
+                <p style="margin:14px 0 0;font-size:15px;line-height:1.65;color:#4A5163;">You're one tap from early access to Nigeria's escrow-backed marketplace &mdash; plus verified-seller onboarding before the crowd arrives.</p>
               </td>
             </tr>
             <tr>
@@ -107,23 +112,23 @@ function html(url: string): string {
             <tr>
               <td align="center" style="padding:22px 40px 0;font-family:${FONT};">
                 <p style="margin:0;font-size:12px;line-height:1.6;color:#8A93A6;">or paste this link into your browser</p>
-                <p style="margin:5px 0 0;font-size:12px;line-height:1.6;word-break:break-all;"><a href="${url}" style="color:#22D3EE;text-decoration:none;">${url}</a></p>
+                <p style="margin:5px 0 0;font-size:12px;line-height:1.6;word-break:break-all;"><a href="${url}" style="color:#6B46F0;text-decoration:none;">${url}</a></p>
               </td>
             </tr>
             <tr>
               <td style="padding:28px 40px 0;">
-                <div style="height:1px;background-color:#232838;font-size:0;line-height:0;">&nbsp;</div>
+                <div style="height:1px;background-color:#E4E7EC;font-size:0;line-height:0;">&nbsp;</div>
               </td>
             </tr>
             <tr>
               <td align="center" style="padding:20px 40px 34px;font-family:${FONT};">
-                <p style="margin:0;font-size:12px;line-height:1.65;color:#707A8C;">Every naira sits in escrow until you confirm the deal. If you didn't sign up for WCP Markets, you can safely ignore this email.</p>
+                <p style="margin:0;font-size:12px;line-height:1.65;color:#98A0AE;">Every naira sits in escrow until you confirm the deal. If you didn't sign up for WCP Markets, you can safely ignore this email.</p>
               </td>
             </tr>
           </table>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
             <tr>
-              <td align="center" style="padding:18px 40px 0;font-family:${FONT};font-size:11px;color:#5B6577;">© WCP Markets · Nigeria</td>
+              <td align="center" style="padding:18px 40px 0;font-family:${FONT};font-size:11px;color:#98A0AE;">© WCP Markets · Nigeria</td>
             </tr>
           </table>
         </td>
