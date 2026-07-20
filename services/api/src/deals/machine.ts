@@ -31,7 +31,8 @@ export const DEAL_STATES = [
   "PAYMENT_PENDING", // buyer paid; awaiting escrow webhook
   "PAID_IN_ESCROW", // funds held; stock decremented; awaiting hand-off
   "HANDED_OFF", // seller handed off; 48h auto-release to buyer confirm
-  "DISPUTED", // dispute open; 24h response → auto-refund
+  "DISPUTED", // buyer opened a dispute; 24h seller-response clock → auto-refund
+  "DISPUTED_RESPONDED", // seller responded → clock stops; awaiting admin resolution
   // ── Terminal ──
   "WITHDRAWN", // buyer pulled out
   "DECLINED", // seller declined
@@ -69,6 +70,7 @@ export const DEAL_ACTIONS = [
   "confirm_receipt",
   "auto_release",
   "dispute",
+  "respond", // seller responds to a dispute (stops the 24h clock; → awaiting admin)
   "resolve_release",
   "resolve_refund",
   "auto_refund",
@@ -131,8 +133,12 @@ export const TRANSITIONS: readonly Transition[] = [
   { from: "PAID_IN_ESCROW", actor: "BUYER", action: "dispute", to: "DISPUTED", milestone: "M6" },
   { from: "HANDED_OFF", actor: "BUYER", action: "dispute", to: "DISPUTED", milestone: "M6" },
   { from: "DISPUTED", actor: "SYSTEM", action: "auto_refund", to: "REFUNDED", milestone: "M6" }, // 24h silence
+  { from: "DISPUTED", actor: "SELLER", action: "respond", to: "DISPUTED_RESPONDED", milestone: "M6" }, // stops the clock
   { from: "DISPUTED", actor: "ADMIN", action: "resolve_release", to: "COMPLETED", milestone: "M6" },
   { from: "DISPUTED", actor: "ADMIN", action: "resolve_refund", to: "REFUNDED", milestone: "M6" },
+  // Seller responded → an admin (CX/support) adjudicates; no auto-timer here.
+  { from: "DISPUTED_RESPONDED", actor: "ADMIN", action: "resolve_release", to: "COMPLETED", milestone: "M6" },
+  { from: "DISPUTED_RESPONDED", actor: "ADMIN", action: "resolve_refund", to: "REFUNDED", milestone: "M6" },
 ] as const;
 
 /**

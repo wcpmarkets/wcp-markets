@@ -3,7 +3,7 @@
 
 -- All valid deal states (for the CHECK on deals.state / deal_events.to_state).
 create or replace function public.deal_states() returns text[] language sql immutable as $$
-  select array['OFFERED', 'COUNTERED_BY_SELLER', 'COUNTERED_BY_BUYER', 'ACCEPTED', 'PAYMENT_PENDING', 'PAID_IN_ESCROW', 'HANDED_OFF', 'DISPUTED', 'WITHDRAWN', 'DECLINED', 'EXPIRED', 'COMPLETED', 'REFUNDED']::text[];
+  select array['OFFERED', 'COUNTERED_BY_SELLER', 'COUNTERED_BY_BUYER', 'ACCEPTED', 'PAYMENT_PENDING', 'PAID_IN_ESCROW', 'HANDED_OFF', 'DISPUTED', 'DISPUTED_RESPONDED', 'WITHDRAWN', 'DECLINED', 'EXPIRED', 'COMPLETED', 'REFUNDED']::text[];
 $$;
 
 create or replace function public.deal_terminal_states() returns text[] language sql immutable as $$
@@ -44,8 +44,11 @@ returns text language sql immutable as $$
     ('PAID_IN_ESCROW', 'BUYER', 'dispute', 'DISPUTED'),
     ('HANDED_OFF', 'BUYER', 'dispute', 'DISPUTED'),
     ('DISPUTED', 'SYSTEM', 'auto_refund', 'REFUNDED'),
+    ('DISPUTED', 'SELLER', 'respond', 'DISPUTED_RESPONDED'),
     ('DISPUTED', 'ADMIN', 'resolve_release', 'COMPLETED'),
-    ('DISPUTED', 'ADMIN', 'resolve_refund', 'REFUNDED')
+    ('DISPUTED', 'ADMIN', 'resolve_refund', 'REFUNDED'),
+    ('DISPUTED_RESPONDED', 'ADMIN', 'resolve_release', 'COMPLETED'),
+    ('DISPUTED_RESPONDED', 'ADMIN', 'resolve_refund', 'REFUNDED')
   ) as t(from_state, actor, action, to_state)
   where from_state = p_from and actor = p_actor and action = p_action;
 $$;
