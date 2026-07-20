@@ -72,6 +72,16 @@ const refundBuyer: Effect = async (sql, { deal, seq, action }) => {
       ${sql.json({ dealId: deal.id, seq, amount, reason: refundReason(action, deal.state) })},
       ${deal.id}, ${seq})
   `;
+  // A 24h-silence auto-refund resolves a dispute with NO route running — close the
+  // support case row here, in-tx, so it can't rot at status='open' in the queue.
+  if (action === "auto_refund" && deal.state === "DISPUTED") {
+    await sql`
+      update public.dispute_cases
+      set status = 'resolved', resolution = 'refund', resolved_at = now(),
+          resolution_note = coalesce(resolution_note, 'auto-refund: seller did not respond in 24h')
+      where deal_id = ${deal.id} and status <> 'resolved'
+    `;
+  }
 };
 
 export const EFFECTS: Partial<Record<DealAction, Effect>> = {

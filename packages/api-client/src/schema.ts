@@ -1412,7 +1412,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["DisputeCase"][];
+                        "application/json": components["schemas"]["DisputeQueueItem"][];
                     };
                 };
                 /** @description Unauthorized */
@@ -1627,6 +1627,23 @@ export interface components {
             /** @enum {string} */
             resolution: "release" | "refund";
             note?: string;
+        };
+        DisputeQueueItem: {
+            /** Format: uuid */
+            dealId: string;
+            dealState: string;
+            /** Format: uuid */
+            buyerId: string;
+            /** Format: uuid */
+            sellerId: string;
+            /** @enum {string|null} */
+            status: "open" | "responded" | "resolved" | null;
+            reason: string | null;
+            /** Format: uuid */
+            openedBy: string | null;
+            createdAt: string | null;
+            respondedAt: string | null;
+            buyerDisputes30d: number;
         };
     };
     responses: never;

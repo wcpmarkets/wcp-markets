@@ -62,12 +62,19 @@ async function main() {
     check("deal is DISPUTED", (await dealState(deal.id, buyer.token)) === "DISPUTED");
 
     const q = await fetch(`${API}/admin/disputes`, { headers: H(adminU.token) });
-    const queue = (await q.json()) as { dealId: string }[];
-    check("staff sees the dispute in the queue", q.status === 200 && queue.some((x) => x.dealId === deal.id));
+    const queue = (await q.json()) as { dealId: string; dealState: string; buyerDisputes30d: number }[];
+    const qItem = queue.find((x) => x.dealId === deal.id);
+    check("staff sees the dispute in the state-driven queue", q.status === 200 && !!qItem && qItem.dealState === "DISPUTED");
+    check("queue shows the buyer's dispute count", (qItem?.buyerDisputes30d ?? 0) >= 1, `${qItem?.buyerDisputes30d}`);
     check("non-staff GET /admin/disputes → 403", (await fetch(`${API}/admin/disputes`, { headers: H(nonStaff.token) })).status === 403);
 
     const badResolve = await fetch(`${API}/deals/${deal.id}/dispute/resolve`, { method: "POST", headers: H(nonStaff.token), body: JSON.stringify({ resolution: "refund" }) });
     check("non-staff resolve → 403 (deal untouched)", badResolve.status === 403 && (await dealState(deal.id, buyer.token)) === "DISPUTED");
+
+    // Conflict of interest: even a real staff admin who is a PARTY can't resolve their own deal.
+    await sql`insert into public.staff_roles (user_id, role) values (${seller.id}, 'admin') on conflict (user_id) do update set role = 'admin'`;
+    const coi = await fetch(`${API}/deals/${deal.id}/dispute/resolve`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ resolution: "release" }) });
+    check("staff-but-party resolve → 403 conflict_of_interest", coi.status === 403 && ((await coi.json()) as { error: string }).error === "conflict_of_interest", `${coi.status}`);
 
     const rr = await fetch(`${API}/deals/${deal.id}/dispute/respond`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ response: "it was sealed", evidence: "receipt" }) });
     check("seller POST /respond → 200 responded", rr.status === 200 && ((await rr.json()) as { status: string }).status === "responded");
@@ -91,7 +98,7 @@ async function main() {
     await sql`delete from public.outbox where deal_id in (select id from public.deals where seller_id = ${seller.id})`;
     await sql`delete from public.deals where seller_id = ${seller.id}`;
     await sql`delete from public.listings where seller_id = ${seller.id}`;
-    await sql`delete from public.staff_roles where user_id = ${adminU.id}`;
+    await sql`delete from public.staff_roles where user_id in ${sql([adminU.id, seller.id])}`;
     await sql.end({ timeout: 5 });
     for (const u of [seller, buyer, adminU, nonStaff]) await fetch(`${BASE}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: admin });
   }

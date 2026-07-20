@@ -6,6 +6,11 @@ import type { Sql } from "./commands.js";
  * revoked instantly (no token-refresh lag) and every resolution carries the rep's
  * user id. Grows into granular RBAC (a permissions table) without a rewrite.
  */
+/**
+ * The caller's staff role, or null. NEVER use `staffRole(...) != null` as a boolean
+ * privilege gate — 'agent' exists for future granular RBAC and grants nothing today;
+ * a mere-presence check would silently privilege it. Gate on the SPECIFIC role.
+ */
 export async function staffRole(db: Sql, userId: string): Promise<string | null> {
   const [r] = await db<{ role: string }[]>`
     select role from public.staff_roles where user_id = ${userId}

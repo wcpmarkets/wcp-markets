@@ -751,6 +751,77 @@
         "required": [
           "resolution"
         ]
+      },
+      "DisputeQueueItem": {
+        "type": "object",
+        "properties": {
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dealState": {
+            "type": "string"
+          },
+          "buyerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "open",
+              "responded",
+              "resolved"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "openedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "respondedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "buyerDisputes30d": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dealId",
+          "dealState",
+          "buyerId",
+          "sellerId",
+          "status",
+          "reason",
+          "openedBy",
+          "createdAt",
+          "respondedAt",
+          "buyerDisputes30d"
+        ]
       }
     },
     "parameters": {}
@@ -2136,7 +2207,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/DisputeCase"
+                    "$ref": "#/components/schemas/DisputeQueueItem"
                   }
                 }
               }

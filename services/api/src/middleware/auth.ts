@@ -36,16 +36,25 @@ export const auth = createMiddleware<AuthEnv>(async (c, next) => {
     return c.json({ error: "unauthorized" }, 401);
   }
 
+  // Pin the audience (Supabase user tokens are aud="authenticated") and issuer
+  // (the project's /auth/v1) so verification is deliberate, not incidentally saved
+  // by the sub check — a token minted for another aud/issuer is rejected outright.
+  const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
+  const verifyOpts = {
+    audience: "authenticated",
+    ...(url ? { issuer: `${url}/auth/v1` } : {}),
+  };
+
   try {
     let payload: JWTPayload;
     if (alg === "HS256") {
       const secret = process.env.SUPABASE_JWT_SECRET;
       if (!secret) throw new Error("HS256 token but SUPABASE_JWT_SECRET unset");
-      ({ payload } = await jwtVerify(token, new TextEncoder().encode(secret)));
+      ({ payload } = await jwtVerify(token, new TextEncoder().encode(secret), verifyOpts));
     } else {
       const keys = getJwks();
       if (!keys) throw new Error("asymmetric token but SUPABASE_URL unset");
-      ({ payload } = await jwtVerify(token, keys));
+      ({ payload } = await jwtVerify(token, keys, verifyOpts));
     }
 
     const sub = payload.sub;

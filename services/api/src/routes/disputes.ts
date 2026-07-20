@@ -40,6 +40,24 @@ const DisputeResolveSchema = z
   .object({ resolution: z.enum(["release", "refund"]), note: z.string().max(2000).optional() })
   .openapi("DisputeResolve");
 
+// The support queue is driven by the AUTHORITATIVE deal state (a dispute is never
+// lost from view even if its case row write failed); the case fields are display
+// data (nullable). buyerDisputes30d surfaces a serial-disputer at decision time.
+const DisputeQueueItemSchema = z
+  .object({
+    dealId: z.string().uuid(),
+    dealState: z.string(),
+    buyerId: z.string().uuid(),
+    sellerId: z.string().uuid(),
+    status: z.enum(["open", "responded", "resolved"]).nullable(),
+    reason: z.string().nullable(),
+    openedBy: z.string().uuid().nullable(),
+    createdAt: z.string().nullable(),
+    respondedAt: z.string().nullable(),
+    buyerDisputes30d: z.number().int(),
+  })
+  .openapi("DisputeQueueItem");
+
 type CaseRow = {
   deal_id: string;
   opened_by: string;
@@ -74,6 +92,31 @@ function toCase(r: CaseRow): z.infer<typeof DisputeCaseSchema> {
     resolvedAt: isoN(r.resolved_at),
   };
 }
+// If a case row is (rarely) missing because its write lost the crash-window race
+// after the authoritative transition committed, return a degraded stub rather than
+// 500 — the deal state machine + deal_events remain the source of truth.
+function stubCase(
+  dealId: string,
+  patch: Partial<z.infer<typeof DisputeCaseSchema>>,
+): z.infer<typeof DisputeCaseSchema> {
+  return {
+    dealId,
+    openedBy: dealId,
+    reason: "(case record unavailable — see deal events)",
+    buyerEvidence: null,
+    sellerResponse: null,
+    sellerEvidence: null,
+    status: "open",
+    resolution: null,
+    resolvedBy: null,
+    resolutionNote: null,
+    createdAt: new Date().toISOString(),
+    respondedAt: null,
+    resolvedAt: null,
+    ...patch,
+  };
+}
+
 const idem = (c: { req: { header: (n: string) => string | undefined } }) =>
   c.req.header("idempotency-key") ?? undefined;
 const SELECT = `deal_id, opened_by, reason, buyer_evidence, seller_response, seller_evidence,
@@ -182,10 +225,10 @@ export function registerDisputes(app: OpenAPIHono<AuthEnv>) {
         update public.dispute_cases
         set seller_response = ${b.response}, seller_evidence = ${b.evidence ?? null},
             status = 'responded', responded_at = now()
-        where deal_id = ${id}
+        where deal_id = ${id} and status <> 'resolved'
         returning ${db.unsafe(SELECT)}
       `;
-      return c.json(toCase(row!), 200);
+      return c.json(row ? toCase(row) : stubCase(id, { status: "responded", sellerResponse: b.response }), 200);
     },
   );
 
@@ -219,6 +262,15 @@ export function registerDisputes(app: OpenAPIHono<AuthEnv>) {
       const { id } = c.req.valid("param");
       const b = c.req.valid("json");
 
+      // Conflict of interest: a staff member who is a party to the deal must not
+      // adjudicate their own dispute (the whole product is "the neutral party").
+      const [deal] = await db<{ buyer_id: string; seller_id: string }[]>`
+        select buyer_id, seller_id from public.deals where id = ${id}
+      `;
+      if (!deal) return c.json({ error: "not_found" }, 404);
+      if (deal.buyer_id === user.sub || deal.seller_id === user.sub)
+        return c.json({ error: "conflict_of_interest" }, 403);
+
       const r = await transition(db, {
         dealId: id,
         actor: "ADMIN",
@@ -238,7 +290,10 @@ export function registerDisputes(app: OpenAPIHono<AuthEnv>) {
         where deal_id = ${id}
         returning ${db.unsafe(SELECT)}
       `;
-      return c.json(toCase(row!), 200);
+      return c.json(
+        row ? toCase(row) : stubCase(id, { status: "resolved", resolution: b.resolution, resolvedBy: user.sub }),
+        200,
+      );
     },
   );
 
@@ -279,6 +334,8 @@ export function registerDisputes(app: OpenAPIHono<AuthEnv>) {
   );
 
   // ── GET /admin/disputes — the support queue (staff only) ────────────────────
+  // Driven by the AUTHORITATIVE deal state, left-joined to the (display-only) case —
+  // so a dispute is never lost from the queue even if its case row write failed.
   app.openapi(
     createRoute({
       method: "get",
@@ -288,7 +345,7 @@ export function registerDisputes(app: OpenAPIHono<AuthEnv>) {
       security: [{ bearerAuth: [] }],
       middleware: [auth] as const,
       responses: {
-        200: { description: "Open disputes", content: { "application/json": { schema: z.array(DisputeCaseSchema) } } },
+        200: { description: "Open disputes", content: { "application/json": { schema: z.array(DisputeQueueItemSchema) } } },
         401: { description: "Unauthorized" },
         403: { description: "Not staff", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
@@ -299,11 +356,45 @@ export function registerDisputes(app: OpenAPIHono<AuthEnv>) {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       if (!(await isStaffAdmin(db, user.sub))) return c.json({ error: "forbidden" }, 403);
-      const rows = await db<CaseRow[]>`
-        select ${db.unsafe(SELECT)} from public.dispute_cases
-        where status <> 'resolved' order by created_at
+      const rows = await db<
+        {
+          deal_id: string;
+          deal_state: string;
+          buyer_id: string;
+          seller_id: string;
+          status: "open" | "responded" | "resolved" | null;
+          reason: string | null;
+          opened_by: string | null;
+          created_at: string | Date | null;
+          responded_at: string | Date | null;
+          buyer_disputes_30d: number;
+        }[]
+      >`
+        select d.id as deal_id, d.state as deal_state, d.buyer_id, d.seller_id,
+               c.status, c.reason, c.opened_by, c.created_at, c.responded_at,
+               (select count(*) from public.deal_events e
+                where e.action = 'dispute' and e.actor_id = d.buyer_id
+                  and e.created_at > now() - interval '30 days')::int as buyer_disputes_30d
+        from public.deals d
+        left join public.dispute_cases c on c.deal_id = d.id
+        where d.state in ('DISPUTED', 'DISPUTED_RESPONDED')
+        order by coalesce(c.created_at, d.updated_at)
       `;
-      return c.json(rows.map(toCase), 200);
+      return c.json(
+        rows.map((r) => ({
+          dealId: r.deal_id,
+          dealState: r.deal_state,
+          buyerId: r.buyer_id,
+          sellerId: r.seller_id,
+          status: r.status,
+          reason: r.reason,
+          openedBy: r.opened_by,
+          createdAt: isoN(r.created_at),
+          respondedAt: isoN(r.responded_at),
+          buyerDisputes30d: r.buyer_disputes_30d,
+        })),
+        200,
+      );
     },
   );
 }

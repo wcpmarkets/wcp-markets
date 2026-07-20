@@ -56,7 +56,8 @@ export const handler = async () => {
   try {
     const r = await reconcileAndRecord(db);
     recon =
-      `drift=${r.driftDeals.length} overdue=${r.settlementOverdue.length} parked=${r.parkedOutbox}` +
+      `drift=${r.driftDeals.length} overdue=${r.settlementOverdue.length} parked=${r.parkedOutbox} ` +
+      `disputesOverdue=${r.disputesOverdue.length}` +
       (r.globalBalanceKobo !== 0 ? " +GLOBAL_IMBALANCE" : "");
   } catch (e) {
     errors.push(e);

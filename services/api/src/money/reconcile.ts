@@ -19,12 +19,19 @@ const SETTLEMENT_GRACE_MINS = 15;
 
 export type DriftDeal = { dealId: string; escrowKobo: number; principalKobo: number; state: string };
 export type OverdueDeal = { dealId: string; escrowKobo: number; state: string };
+export type StuckDispute = { dealId: string; state: string };
 export type ReconResult = {
   globalBalanceKobo: number;
   driftDeals: DriftDeal[];
   settlementOverdue: OverdueDeal[];
   parkedOutbox: number;
+  disputesOverdue: StuckDispute[];
 };
+
+// DISPUTED should clear within 24h (auto_refund) and DISPUTED_RESPONDED is a human
+// queue — neither has a settlement-lag alarm (invariant 3 is terminal-only), so a
+// dispute holding buyer funds can otherwise sit unmonitored forever.
+const DISPUTE_SLA_HOURS = 48;
 
 export async function reconcile(db: Sql): Promise<ReconResult> {
   const [g] = await db<{ total: string }[]>`
@@ -50,11 +57,17 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     select count(*)::int as n from public.outbox
     where relayed_at is null and attempts >= ${OUTBOX_MAX_ATTEMPTS}
   `;
+  const disputes = await db<{ deal_id: string; state: string }[]>`
+    select id as deal_id, state from public.deals
+    where state in ('DISPUTED', 'DISPUTED_RESPONDED')
+      and updated_at < now() - make_interval(hours => ${DISPUTE_SLA_HOURS})
+  `;
   return {
     globalBalanceKobo: Number(g!.total),
     driftDeals: drift.map((r) => ({ dealId: r.deal_id, escrowKobo: Number(r.esc), principalKobo: Number(r.principal), state: r.state })),
     settlementOverdue: overdue.map((r) => ({ dealId: r.deal_id, escrowKobo: Number(r.esc), state: r.state })),
     parkedOutbox: parked!.n,
+    disputesOverdue: disputes.map((r) => ({ dealId: r.deal_id, state: r.state })),
   };
 }
 
@@ -65,12 +78,17 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
  */
 export async function reconcileAndRecord(db: Sql): Promise<ReconResult> {
   const r = await reconcile(db);
-  const bad = r.globalBalanceKobo !== 0 || r.driftDeals.length > 0 || r.settlementOverdue.length > 0 || r.parkedOutbox > 0;
+  const bad =
+    r.globalBalanceKobo !== 0 ||
+    r.driftDeals.length > 0 ||
+    r.settlementOverdue.length > 0 ||
+    r.parkedOutbox > 0 ||
+    r.disputesOverdue.length > 0;
   if (!bad) return r;
 
   console.error(
     `[reconcile] ANOMALY — global=${r.globalBalanceKobo} drift=${r.driftDeals.length} ` +
-      `overdue=${r.settlementOverdue.length} parkedOutbox=${r.parkedOutbox}`,
+      `overdue=${r.settlementOverdue.length} parkedOutbox=${r.parkedOutbox} disputesOverdue=${r.disputesOverdue.length}`,
   );
 
   const record = (dealId: string | null, kind: string, detail: string) => db`
@@ -87,6 +105,9 @@ export async function reconcileAndRecord(db: Sql): Promise<ReconResult> {
   }
   for (const d of r.settlementOverdue.slice(0, 50)) {
     await record(d.dealId, "settlement_overdue", `escrow=${d.escrowKobo} state=${d.state} (>${SETTLEMENT_GRACE_MINS}m)`);
+  }
+  for (const d of r.disputesOverdue.slice(0, 50)) {
+    await record(d.dealId, "dispute_sla_overdue", `state=${d.state} (>${DISPUTE_SLA_HOURS}h, funds held)`);
   }
   if (r.globalBalanceKobo !== 0) await record(null, "ledger_global_imbalance", `total=${r.globalBalanceKobo}`);
   if (r.parkedOutbox > 0) await record(null, "outbox_parked", `count=${r.parkedOutbox} (attempts>=${OUTBOX_MAX_ATTEMPTS})`);

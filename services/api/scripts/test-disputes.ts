@@ -6,6 +6,7 @@ import { createOffer, transition } from "../src/deals/commands.js";
 import { buyerFeeKobo, sellerFeeKobo } from "../src/money/fees.js";
 import { settleRefund, settleRelease } from "../src/money/ledger.js";
 import { isStaffAdmin } from "../src/deals/admin.js";
+import { reconcile } from "../src/money/reconcile.js";
 
 /**
  * M6 — disputes at the command layer against the cloud DB. Three resolution paths:
@@ -67,8 +68,12 @@ async function main() {
     const da = await transition(sql, { dealId: a, actor: "BUYER", actorId: buyers[0]!, action: "dispute", reason: "item not as described" });
     check("buyer dispute → DISPUTED", da.ok && da.deal.state === "DISPUTED", (da as any).deal?.state ?? (da as any).code);
     check("DISPUTED schedules 24h auto_refund deadline", (await deadline(a))[0]?.action === "auto_refund");
+    // a dispute case row exists (the route creates it) — the auto_refund effect must close it in-tx
+    await sql`insert into public.dispute_cases (deal_id, opened_by, reason) values (${a}, ${buyers[0]!}, 'item not as described') on conflict (deal_id) do nothing`;
     const ar = await transition(sql, { dealId: a, actor: "SYSTEM", action: "auto_refund", reason: "dispute silence" });
     check("SYSTEM auto_refund → REFUNDED", ar.ok && ar.deal.state === "REFUNDED", (ar as any).deal?.state);
+    const [caseA] = await sql<{ status: string; resolution: string | null }[]>`select status, resolution from public.dispute_cases where deal_id = ${a}`;
+    check("A: auto_refund closed the dispute case in-tx", caseA?.status === "resolved" && caseA?.resolution === "refund", `${caseA?.status}/${caseA?.resolution}`);
     await settleRefund(sql, { dealId: a, amountKobo: P + BFEE, providerRef: `mock_ref_${a}` });
     check("A: buyer made whole (escrow 0, external 0)", Number((await acct(a, "escrow_holding"))[0]!.s) === 0 && Number((await acct(a, "external"))[0]!.s) === 0);
 
@@ -103,6 +108,14 @@ async function main() {
     await sql`insert into public.staff_roles (user_id, role) values (${staffUser}, 'admin') on conflict (user_id) do update set role = 'admin'`;
     check("staff admin recognised", (await isStaffAdmin(sql, staffUser)) === true);
     check("non-staff user rejected", (await isStaffAdmin(sql, nonStaff)) === false);
+
+    // ── E) dispute-SLA reconcile: a DISPUTED deal stuck >48h is flagged ─────────
+    const [sd] = await sql<{ id: string }[]>`
+      insert into public.deals (listing_id, buyer_id, seller_id, state, price_kobo, updated_at)
+      values (${listingId}, ${buyers[0]!}, ${seller}, 'DISPUTED', ${P}, now() - interval '3 days')
+      returning id`;
+    const rec = await reconcile(sql);
+    check("reconcile flags a DISPUTED deal stuck >48h", rec.disputesOverdue.some((x) => x.dealId === sd!.id), JSON.stringify(rec.disputesOverdue.filter((x) => x.dealId === sd!.id)));
   } finally {
     await sql`delete from public.dispute_cases where deal_id in (select id from public.deals where seller_id = ${seller})`;
     await sql`delete from public.ledger_entries where deal_id in (select id from public.deals where seller_id = ${seller})`;
