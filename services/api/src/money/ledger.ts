@@ -5,6 +5,26 @@ import { buyerFeeKobo, sellerFeeKobo } from "./fees.js";
 /** A settlement webhook either booked its ledger or was refused (recorded, not booked). */
 export type SettleResult = { ok: true } | { ok: false; reason: string };
 
+/**
+ * Has this deal already been settled for `movement`? "same" = a redelivery of the
+ * same provider ref (idempotent replay); "different" = a SECOND ref for the same deal
+ * — a double-settle that the (deal_id, movement, provider_ref, account) idempotency
+ * index does NOT catch, so it would double-book. Refuse it.
+ */
+async function priorSettlement(
+  sql: Tx,
+  dealId: string,
+  movement: string,
+  providerRef: string,
+): Promise<"none" | "same" | "different"> {
+  const [r] = await sql<{ provider_ref: string | null }[]>`
+    select provider_ref from public.ledger_entries
+    where deal_id = ${dealId} and movement = ${movement} limit 1
+  `;
+  if (!r) return "none";
+  return r.provider_ref === providerRef ? "same" : "different";
+}
+
 /** The amount the hold booked for a deal (principal + the fee actually captured),
  * read back from the ledger so refunds reverse exactly what was held. */
 async function heldAmount(sql: Tx, dealId: string): Promise<number | null> {
@@ -66,10 +86,23 @@ export async function settlePayout(
   p: { dealId: string; amountKobo: number; providerRef: string },
 ): Promise<SettleResult> {
   return db.begin(async (sql) => {
-    const [po] = await sql<{ id: string; status: string }[]>`
-      select id, status from public.payouts where deal_id = ${p.dealId}
+    const [po] = await sql<{ id: string; status: string; amount_kobo: string | number }[]>`
+      select id, status, amount_kobo from public.payouts where deal_id = ${p.dealId} for update
     `;
     if (!po) return { ok: false, reason: "unknown_payout" };
+    if (Number(po.amount_kobo) !== p.amountKobo)
+      return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${po.amount_kobo}` };
+    if (po.status === "settled") return { ok: true }; // idempotent
+    const prior = await priorSettlement(sql, p.dealId, "payout", p.providerRef);
+    if (prior === "different") return { ok: false, reason: "already_paid_diff_ref" };
+    // Belt: the deal's outstanding seller_payable must equal what we're paying out.
+    const [bal] = await sql<{ s: string }[]>`
+      select coalesce(sum(amount_kobo), 0)::bigint as s from public.ledger_entries
+      where deal_id = ${p.dealId} and account = 'seller_payable'
+    `;
+    if (Number(bal!.s) !== p.amountKobo)
+      return { ok: false, reason: `balance_mismatch:${bal!.s}!=${p.amountKobo}` };
+
     await writePayout(sql, { dealId: p.dealId, amountKobo: p.amountKobo, providerRef: p.providerRef });
     await sql`
       update public.payouts set status = 'settled', settled_at = now(), provider_ref = ${p.providerRef}
@@ -138,6 +171,8 @@ export async function settleRelease(
     const expectedPayout = principal - sellerFee;
     if (p.amountKobo !== expectedPayout)
       return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${expectedPayout}` };
+    const prior = await priorSettlement(sql, p.dealId, "release", p.providerRef);
+    if (prior === "different") return { ok: false, reason: "already_released_diff_ref" };
     await writeRelease(sql, { dealId: p.dealId, seq: null, principal, sellerFee, providerRef: p.providerRef });
     return { ok: true };
   });
@@ -165,6 +200,8 @@ export async function settleRefund(
     const expected = (await heldAmount(sql, p.dealId)) ?? principal + buyerFeeKobo(principal);
     if (p.amountKobo !== expected)
       return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${expected}` };
+    const prior = await priorSettlement(sql, p.dealId, "refund", p.providerRef);
+    if (prior === "different") return { ok: false, reason: "already_refunded_diff_ref" };
     await writeRefund(sql, {
       dealId: p.dealId,
       seq: null,

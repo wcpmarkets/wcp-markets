@@ -26,7 +26,11 @@ export type ReconResult = {
   settlementOverdue: OverdueDeal[];
   parkedOutbox: number;
   disputesOverdue: StuckDispute[];
+  payoutsOverdue: string[]; // payout deal ids stuck 'pending'
+  negativePayable: string[]; // deal ids with seller_payable < 0 (double-payout tripwire)
 };
+
+const PAYOUT_GRACE_MINS = 30;
 
 // DISPUTED should clear within 24h (auto_refund) and DISPUTED_RESPONDED is a human
 // queue — neither has a settlement-lag alarm (invariant 3 is terminal-only), so a
@@ -62,12 +66,25 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     where state in ('DISPUTED', 'DISPUTED_RESPONDED')
       and updated_at < now() - make_interval(hours => ${DISPUTE_SLA_HOURS})
   `;
+  // (6) A payout stuck 'pending' past the grace = the seller is owed and unpaid, with
+  // no other alarm watching it (escrow=0, deal terminal). (7) seller_payable < 0 on
+  // any deal = a double-payout already happened (the direct tripwire for settlePayout).
+  const payoutsStuck = await db<{ deal_id: string }[]>`
+    select deal_id from public.payouts
+    where status = 'pending' and created_at < now() - make_interval(mins => ${PAYOUT_GRACE_MINS})
+  `;
+  const negPayable = await db<{ deal_id: string }[]>`
+    select deal_id from public.ledger_entries where account = 'seller_payable'
+    group by deal_id having sum(amount_kobo) < 0
+  `;
   return {
     globalBalanceKobo: Number(g!.total),
     driftDeals: drift.map((r) => ({ dealId: r.deal_id, escrowKobo: Number(r.esc), principalKobo: Number(r.principal), state: r.state })),
     settlementOverdue: overdue.map((r) => ({ dealId: r.deal_id, escrowKobo: Number(r.esc), state: r.state })),
     parkedOutbox: parked!.n,
     disputesOverdue: disputes.map((r) => ({ dealId: r.deal_id, state: r.state })),
+    payoutsOverdue: payoutsStuck.map((r) => r.deal_id),
+    negativePayable: negPayable.map((r) => r.deal_id),
   };
 }
 
@@ -83,12 +100,15 @@ export async function reconcileAndRecord(db: Sql): Promise<ReconResult> {
     r.driftDeals.length > 0 ||
     r.settlementOverdue.length > 0 ||
     r.parkedOutbox > 0 ||
-    r.disputesOverdue.length > 0;
+    r.disputesOverdue.length > 0 ||
+    r.payoutsOverdue.length > 0 ||
+    r.negativePayable.length > 0;
   if (!bad) return r;
 
   console.error(
     `[reconcile] ANOMALY — global=${r.globalBalanceKobo} drift=${r.driftDeals.length} ` +
-      `overdue=${r.settlementOverdue.length} parkedOutbox=${r.parkedOutbox} disputesOverdue=${r.disputesOverdue.length}`,
+      `overdue=${r.settlementOverdue.length} parkedOutbox=${r.parkedOutbox} disputesOverdue=${r.disputesOverdue.length} ` +
+      `payoutsOverdue=${r.payoutsOverdue.length} negativePayable=${r.negativePayable.length}`,
   );
 
   const record = (dealId: string | null, kind: string, detail: string) => db`
@@ -108,6 +128,12 @@ export async function reconcileAndRecord(db: Sql): Promise<ReconResult> {
   }
   for (const d of r.disputesOverdue.slice(0, 50)) {
     await record(d.dealId, "dispute_sla_overdue", `state=${d.state} (>${DISPUTE_SLA_HOURS}h, funds held)`);
+  }
+  for (const dealId of r.payoutsOverdue.slice(0, 50)) {
+    await record(dealId, "payout_overdue", `payout stuck 'pending' >${PAYOUT_GRACE_MINS}m — seller unpaid`);
+  }
+  for (const dealId of r.negativePayable.slice(0, 50)) {
+    await record(dealId, "negative_seller_payable", "seller_payable < 0 — likely double-payout");
   }
   if (r.globalBalanceKobo !== 0) await record(null, "ledger_global_imbalance", `total=${r.globalBalanceKobo}`);
   if (r.parkedOutbox > 0) await record(null, "outbox_parked", `count=${r.parkedOutbox} (attempts>=${OUTBOX_MAX_ATTEMPTS})`);

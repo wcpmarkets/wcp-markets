@@ -5,6 +5,7 @@ import { fetchSsm } from "../src/secrets.js";
 import { createOffer, transition } from "../src/deals/commands.js";
 import { buyerFeeKobo, sellerFeeKobo } from "../src/money/fees.js";
 import { settleRelease, settlePayout } from "../src/money/ledger.js";
+import { reconcile } from "../src/money/reconcile.js";
 import { MockKycProvider } from "../src/kyc/provider.js";
 
 /**
@@ -70,6 +71,10 @@ async function main() {
     await transition(sql, { dealId: d, actor: "BUYER", actorId: buyer, action: "confirm_receipt" });
     await settleRelease(sql, { dealId: d, providerRef: `mock_rel_${d}`, amountKobo: PAYOUT });
     check("after release: seller_payable = payout (owed, not yet paid)", Number((await acct(d, "seller_payable"))[0]!.s) === PAYOUT);
+    // Fable #2: a SECOND release with a different provider_ref must not double-book.
+    const dupRel = await settleRelease(sql, { dealId: d, providerRef: `OTHER_ref_${d}`, amountKobo: PAYOUT });
+    check("second release with a different ref is refused", (dupRel as { ok: boolean; reason?: string }).ok === false && (dupRel as any).reason === "already_released_diff_ref");
+    check("seller_payable not doubled by the second release", Number((await acct(d, "seller_payable"))[0]!.s) === PAYOUT);
 
     // request + settle the payout
     await sql`insert into public.payouts (deal_id, seller_id, amount_kobo) values (${d}, ${seller}, ${PAYOUT})`;
@@ -85,6 +90,21 @@ async function main() {
     await settlePayout(sql, { dealId: d, amountKobo: PAYOUT, providerRef: `mock_pay_${d}` });
     check("settlePayout idempotent (seller_payable still 0)", Number((await acct(d, "seller_payable"))[0]!.s) === 0);
     check("settlePayout on unknown deal is refused", ((await settlePayout(sql, { dealId: g.deal.id.replace(/.$/, "0"), amountKobo: 1, providerRef: "x" })) as { ok: boolean }).ok === false);
+
+    // ── Reconcile invariants 6 + 7 (Fable #3) ──────────────────────────────────
+    // A payout stuck 'pending' past the grace is flagged.
+    const [l2] = await sql<{ id: string }[]>`insert into public.listings (seller_id, category, title, price_kobo, stock) values (${seller}, 'phones', 'stuck', ${P}, 1) returning id`;
+    const g2 = await createOffer(sql, { listingId: l2!.id, buyerId: buyer, priceKobo: P, qty: 1 });
+    const d2 = (g2 as { ok: true; deal: { id: string } }).deal.id;
+    await sql`insert into public.payouts (deal_id, seller_id, amount_kobo, status, created_at) values (${d2}, ${seller}, ${PAYOUT}, 'pending', now() - interval '1 hour')`;
+    const rec = await reconcile(sql);
+    check("reconcile flags a payout stuck 'pending' >30m", rec.payoutsOverdue.includes(d2));
+    // A deal with seller_payable < 0 (the double-payout tripwire) is flagged.
+    const grp = (await sql<{ g: string }[]>`select gen_random_uuid() as g`)[0]!.g;
+    await sql`insert into public.ledger_entries (txn_group, deal_id, account, amount_kobo, movement, provider_ref)
+              values (${grp}, ${d2}, 'seller_payable', -500, 'payout', 'neg-probe'),
+                     (${grp}, ${d2}, 'external', 500, 'payout', 'neg-probe')`;
+    check("reconcile flags negative seller_payable (double-payout tripwire)", (await reconcile(sql)).negativePayable.includes(d2));
   } finally {
     await sql`delete from public.payouts where seller_id = ${seller}`;
     await sql`delete from public.ledger_entries where deal_id in (select id from public.deals where seller_id = ${seller})`;

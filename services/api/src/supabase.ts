@@ -69,4 +69,18 @@ export async function createSignedDownloadUrl(
   return `${storageBase()}${body.signedURL}`;
 }
 
+/** Delete a private object (best-effort — used to clean up orphaned KYC selfies). */
+export async function deleteStorageObject(bucket: string, path: string): Promise<void> {
+  const key = await getServiceKey();
+  if (!key) return;
+  try {
+    await fetch(`${storageBase()}/object/${bucket}/${path}`, {
+      method: "DELETE",
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    });
+  } catch (e) {
+    console.error("[supabase] delete object failed", e);
+  }
+}
+
 export const LISTING_IMAGES_BUCKET = "listing-images";

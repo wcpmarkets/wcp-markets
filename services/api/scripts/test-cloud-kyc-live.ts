@@ -65,6 +65,17 @@ async function main() {
     // ── THE GATE: unverified seller cannot be paid out ─────────────────────────
     const kyc0 = await fetch(`${API}/kyc`, { headers: H(seller.token) });
     check("seller starts at L1 (unverified)", ((await kyc0.json()) as { level: number }).level === 1);
+
+    // ── Fable #1: the KYC bypass must be closed — a client cannot self-set L2 ────
+    await fetch(`${API}/me`, { headers: H(seller.token) }); // ensure the profile row exists (L1)
+    const bypass = await fetch(`${BASE}/rest/v1/profiles?id=eq.${seller.id}`, {
+      method: "PATCH",
+      headers: { apikey: seller.token, Authorization: `Bearer ${seller.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ verification_level: 2 }),
+    });
+    const lvlAfterBypass = ((await (await fetch(`${API}/kyc`, { headers: H(seller.token) })).json()) as { level: number }).level;
+    check("client PATCH of verification_level is blocked (KYC bypass closed)", lvlAfterBypass === 1, `http ${bypass.status}, level ${lvlAfterBypass}`);
+
     const blocked = await fetch(`${API}/deals/${deal.id}/payout`, { method: "POST", headers: H(seller.token) });
     check("payout while L1 → 403 kyc_required", blocked.status === 403 && ((await blocked.json()) as { error: string }).error === "kyc_required", `${blocked.status}`);
 

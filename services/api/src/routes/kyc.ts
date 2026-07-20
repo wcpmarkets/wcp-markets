@@ -1,9 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { auth, type AuthEnv } from "../middleware/auth.js";
+import { rateLimit, clientIp } from "../middleware/rate-limit.js";
 import { getDb } from "../db.js";
 import { getKycProvider } from "../kyc/provider.js";
-import { createSignedUploadUrl } from "../supabase.js";
+import { createSignedUploadUrl, deleteStorageObject } from "../supabase.js";
+
+// KYC verify is a match-oracle and (against real NIBSS) costs money per call — cap it
+// per user, falling back to IP if somehow unauthenticated.
+const kycRateLimit = rateLimit({
+  prefix: "kyc:verify",
+  limit: 5,
+  windowSecs: 3600,
+  keys: (c) => [(c.get("user") as { sub?: string } | undefined)?.sub ?? clientIp(c)],
+});
 
 /**
  * M8 — L2 KYC (Mock NIBSS) + payouts, payout-gated. A seller lists/sells freely; a
@@ -89,11 +99,13 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       summary: "Verify identity (BVN/NIN) to reach L2",
       tags: ["kyc"],
       security: [{ bearerAuth: [] }],
-      middleware: [auth] as const,
+      middleware: [auth, kycRateLimit] as const,
       request: { body: { content: { "application/json": { schema: KycVerifySchema } } } },
       responses: {
         200: { description: "Verification outcome", content: { "application/json": { schema: KycStatusSchema } } },
+        400: { description: "Bad request", content: { "application/json": { schema: ErrorSchema } } },
         401: { description: "Unauthorized" },
+        429: { description: "Rate limited", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -102,27 +114,41 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const b = c.req.valid("json");
+      // A selfie must belong to the caller (paths are `${uid}/…`).
+      if (b.selfiePath && !b.selfiePath.startsWith(`${user.sub}/`))
+        return c.json({ error: "invalid_selfie_path" }, 400);
 
+      const [old] = await db<{ selfie_path: string | null; matched: boolean }[]>`
+        select selfie_path, matched from public.kyc_verifications where user_id = ${user.sub}
+      `;
       // The number goes to the provider IN MEMORY and is NEVER stored.
       const result = await getKycProvider().verifyIdentity({ idType: b.idType, idNumber: b.idNumber, selfiePath: b.selfiePath });
-      const level = result.matched ? 2 : 1;
 
-      await db.begin(async (sql) => {
-        await sql`
-          insert into public.kyc_verifications (user_id, id_type, matched, level, selfie_path, provider_ref, updated_at)
-          values (${user.sub}, ${b.idType}, ${result.matched}, ${level}, ${b.selfiePath ?? null}, ${result.providerRef}, now())
-          on conflict (user_id) do update
-            set id_type = excluded.id_type, matched = excluded.matched, level = excluded.level,
-                selfie_path = excluded.selfie_path, provider_ref = excluded.provider_ref, updated_at = now()
-        `;
-        if (result.matched) {
+      // Never DOWNGRADE: a failed re-verify by an already-verified user is a no-op.
+      const wrote = result.matched || !old?.matched;
+      if (wrote) {
+        await db.begin(async (sql) => {
           await sql`
-            insert into public.profiles (id, verification_level) values (${user.sub}, 2)
-            on conflict (id) do update set verification_level = 2, updated_at = now()
+            insert into public.kyc_verifications (user_id, id_type, matched, level, selfie_path, provider_ref, updated_at)
+            values (${user.sub}, ${b.idType}, ${result.matched}, ${result.matched ? 2 : 1}, ${b.selfiePath ?? null}, ${result.providerRef}, now())
+            on conflict (user_id) do update
+              set id_type = excluded.id_type, matched = excluded.matched, level = excluded.level,
+                  selfie_path = excluded.selfie_path, provider_ref = excluded.provider_ref, updated_at = now()
           `;
-        }
-      });
-      return c.json({ level, matched: result.matched, idType: b.idType }, 200);
+          if (result.matched) {
+            await sql`
+              insert into public.profiles (id, verification_level) values (${user.sub}, 2)
+              on conflict (id) do update set verification_level = 2, updated_at = now()
+            `;
+          }
+        });
+        // Clean up the replaced selfie (NDPA data-minimisation — don't leave orphans).
+        if (old?.selfie_path && old.selfie_path !== (b.selfiePath ?? null))
+          await deleteStorageObject("kyc-selfies", old.selfie_path);
+      }
+
+      const matched = result.matched || (old?.matched ?? false);
+      return c.json({ level: matched ? 2 : 1, matched, idType: b.idType }, 200);
     },
   );
 
@@ -190,20 +216,27 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       const amount = Number(bal!.s);
       if (amount <= 0) return c.json({ error: "nothing_to_pay_out" }, 409);
 
-      const out = await db.begin(async (sql) => {
-        const [existing] = await sql<{ id: string }[]>`select id from public.payouts where deal_id = ${id}`;
-        if (existing) return null;
-        const [po] = await sql<PayoutRow[]>`
-          insert into public.payouts (deal_id, seller_id, amount_kobo)
-          values (${id}, ${user.sub}, ${amount})
-          returning id, deal_id, seller_id, amount_kobo, status, created_at, settled_at
-        `;
-        await sql`
-          insert into public.outbox (topic, payload, deal_id)
-          values ('escrow.payout', ${sql.json({ dealId: id, amount, sellerId: user.sub })}, ${id})
-        `;
-        return po!;
-      });
+      let out: PayoutRow | null;
+      try {
+        out = await db.begin(async (sql) => {
+          const [existing] = await sql<{ id: string }[]>`select id from public.payouts where deal_id = ${id}`;
+          if (existing) return null;
+          const [po] = await sql<PayoutRow[]>`
+            insert into public.payouts (deal_id, seller_id, amount_kobo)
+            values (${id}, ${user.sub}, ${amount})
+            returning id, deal_id, seller_id, amount_kobo, status, created_at, settled_at
+          `;
+          await sql`
+            insert into public.outbox (topic, payload, deal_id)
+            values ('escrow.payout', ${sql.json({ dealId: id, amount, sellerId: user.sub })}, ${id})
+          `;
+          return po!;
+        });
+      } catch (e) {
+        // Concurrent request lost the unique(deal_id) race → clean 409, not a 500.
+        if ((e as { code?: string }).code === "23505") return c.json({ error: "already_requested" }, 409);
+        throw e;
+      }
       if (!out) return c.json({ error: "already_requested" }, 409);
       void idem(c);
       return c.json(toPayout(out), 201);
