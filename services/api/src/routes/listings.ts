@@ -217,13 +217,15 @@ const LocationQuery = {
  * - nothing            → nationwide
  * - state              → the whole state
  * - state + city       → that area
- * - state + city + km  → a ring centred on that area, so neighbouring areas
- *                        within the distance come too. This is what the map
- *                        strip in the design shows ("Centred on Yaba · 10 km"),
- *                        and it's the only reading under which 5 vs 25 km
- *                        returns different listings. Rows without a coordinate
- *                        can't be measured, so they drop out of a ring — which
- *                        is why radius is opt-in rather than the default.
+ * - state + city + km  → that area, further narrowed to what sits within the
+ *                        distance of its centre. The radius never widens the
+ *                        scope past the chosen area: it only tightens it, so a
+ *                        buyer who says "Yaba" is never shown Lekki.
+ *
+ * A listing whose seller didn't share a point is anchored to its area centre, so
+ * it's at distance zero and stays in every ring — the radius discriminates only
+ * between listings that carry a real fix, which is the honest behaviour when
+ * that's the only distance we actually know.
  *
  * An unknown state/area is not silently ignored: it narrows to nothing, because
  * quietly widening a filter the user set is worse than an empty result.
@@ -234,11 +236,15 @@ function locationWhere(
 ) {
   if (!q.state) return null;
   if (!q.city) return db`state = ${q.state}`;
-  if (!q.radiusKm) return db`state = ${q.state} and city = ${q.city}`;
+  const area = db`state = ${q.state} and city = ${q.city}`;
+  if (!q.radiusKm) return area;
   const centre = areaCentre(q.state, q.city);
   if (!centre) return db`false`;
   const metres = q.radiusKm * 1000;
-  return db`lat is not null and earth_box(ll_to_earth(${centre.lat}, ${centre.lng}), ${metres}) @> ll_to_earth(lat, lng)
+  // earth_box first so the GiST index does the coarse work; earth_distance then
+  // trims the box corners to a true circle.
+  return db`${area} and lat is not null
+            and earth_box(ll_to_earth(${centre.lat}, ${centre.lng}), ${metres}) @> ll_to_earth(lat, lng)
             and earth_distance(ll_to_earth(${centre.lat}, ${centre.lng}), ll_to_earth(lat, lng)) <= ${metres}`;
 }
 
