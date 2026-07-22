@@ -284,9 +284,15 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (b.state && !isState(b.state)) {
         return c.json({ error: "unknown_state" }, 422);
       }
-      if (b.city && !(b.state && areaCentre(b.state, b.city))) {
+      const centre = b.state && b.city ? areaCentre(b.state, b.city) : null;
+      if (b.city && !centre) {
         return c.json({ error: "unknown_city" }, 422);
       }
+      // A seller who won't share their location still gets placed, at the centre
+      // of the area they chose. Without this they'd be tagged to an area but fall
+      // out of every ring drawn around it, which reads as a bug.
+      const lat = b.lat ?? centre?.lat ?? null;
+      const lng = b.lng ?? centre?.lng ?? null;
       const rows = await db<Row[]>`
         insert into public.listings
           (seller_id, category, title, description, price_kobo, negotiable, stock,
@@ -295,8 +301,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           ${user.sub}, ${b.category}, ${b.title}, ${b.description ?? null},
           ${b.priceKobo}, ${b.negotiable ?? true}, ${b.stock ?? 1},
           ${b.condition ?? "used"}, ${b.location ?? null},
-          ${b.state ?? null}, ${b.city ?? null},
-          ${b.lat ?? null}, ${b.lng ?? null}
+          ${b.state ?? null}, ${b.city ?? null}, ${lat}, ${lng}
         )
         returning ${db.unsafe(SELECT)}
       `;
