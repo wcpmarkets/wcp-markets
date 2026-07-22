@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { auth, type AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
+import { NG_REGIONS, areaCentre, isState } from "../data/ng-regions.js";
 import {
   LISTING_IMAGES_BUCKET,
   createSignedDownloadUrl,
@@ -40,6 +41,10 @@ const ListingSchema = z
     stock: z.number().int().nonnegative(),
     condition: z.enum(CONDITIONS),
     location: z.string().nullable(),
+    // Structured location. `location` stays as the seller's own words (shown on
+    // the card); these two are what browsing groups and filters by.
+    state: z.string().nullable(),
+    city: z.string().nullable(),
     status: z.enum(STATUSES),
     imageUrls: z.array(z.string()),
     createdAt: z.string(),
@@ -57,6 +62,12 @@ const ListingCreateSchema = z
     stock: z.number().int().nonnegative().optional(),
     condition: z.enum(CONDITIONS).optional(),
     location: z.string().max(120).optional(),
+    // Must be a canonical state/area pair (see ng-regions). lat/lng is the
+    // seller's own coarse fix — the only thing that makes a distance ring real.
+    state: z.string().max(64).optional(),
+    city: z.string().max(64).optional(),
+    lat: z.number().min(-90).max(90).optional(),
+    lng: z.number().min(-180).max(180).optional(),
   })
   .openapi("ListingCreate");
 
@@ -70,6 +81,8 @@ const ListingUpdateSchema = z
     stock: z.number().int().nonnegative().optional(),
     condition: z.enum(CONDITIONS).optional(),
     location: z.string().max(120).nullable().optional(),
+    state: z.string().max(64).optional(),
+    city: z.string().max(64).optional(),
     status: z.enum(STATUSES).optional(),
   })
   .openapi("ListingUpdate");
@@ -87,6 +100,37 @@ const ListingSearchPageSchema = z
     nextOffset: z.number().int().nullable(),
   })
   .openapi("ListingSearchPage");
+
+// ── Location facets ─────────────────────────────────────────────────────────
+// One payload drives both the buyer's location picker (every state and area,
+// with how many active listings each holds) and the seller's post-a-listing
+// picker (the canonical names to choose from). Zero-count regions are included
+// deliberately: an empty state must still be selectable, and the seller's list
+// can't be limited to places that already have stock.
+const AreaFacetSchema = z
+  .object({
+    city: z.string(),
+    count: z.number().int().nonnegative(),
+    lat: z.number(),
+    lng: z.number(),
+  })
+  .openapi("AreaFacet");
+
+const StateFacetSchema = z
+  .object({
+    state: z.string(),
+    count: z.number().int().nonnegative(),
+    cities: z.array(AreaFacetSchema),
+  })
+  .openapi("StateFacet");
+
+const LocationFacetsSchema = z
+  .object({
+    /** Active listings nationwide, including any we couldn't place. */
+    total: z.number().int().nonnegative(),
+    states: z.array(StateFacetSchema),
+  })
+  .openapi("LocationFacets");
 
 const ImageUploadRequestSchema = z
   .object({
@@ -112,6 +156,8 @@ type Row = {
   stock: number;
   condition: (typeof CONDITIONS)[number];
   location: string | null;
+  state: string | null;
+  city: string | null;
   image_paths: string[];
   status: (typeof STATUSES)[number];
   created_at: string | Date;
@@ -144,6 +190,8 @@ async function toListing(r: Row): Promise<z.infer<typeof ListingSchema>> {
     stock: r.stock,
     condition: r.condition,
     location: r.location,
+    state: r.state,
+    city: r.city,
     status: r.status,
     imageUrls,
     createdAt: iso(r.created_at),
@@ -152,8 +200,47 @@ async function toListing(r: Row): Promise<z.infer<typeof ListingSchema>> {
 }
 
 const SELECT = `id, seller_id, lane, category, title, description, price_kobo,
-  currency, negotiable, stock, condition, location, image_paths, status,
-  created_at, updated_at`;
+  currency, negotiable, stock, condition, location, state, city, image_paths,
+  status, created_at, updated_at`;
+
+/** Query params every browse surface shares, so /listings and /listings/search
+ * scope identically. */
+const LocationQuery = {
+  state: z.string().max(64).optional(),
+  city: z.string().max(64).optional(),
+  radiusKm: z.coerce.number().int().min(1).max(500).optional(),
+};
+
+/**
+ * Turn a (state, city, radiusKm) triple into a SQL predicate.
+ *
+ * - nothing            → nationwide
+ * - state              → the whole state
+ * - state + city       → that area
+ * - state + city + km  → a ring centred on that area, so neighbouring areas
+ *                        within the distance come too. This is what the map
+ *                        strip in the design shows ("Centred on Yaba · 10 km"),
+ *                        and it's the only reading under which 5 vs 25 km
+ *                        returns different listings. Rows without a coordinate
+ *                        can't be measured, so they drop out of a ring — which
+ *                        is why radius is opt-in rather than the default.
+ *
+ * An unknown state/area is not silently ignored: it narrows to nothing, because
+ * quietly widening a filter the user set is worse than an empty result.
+ */
+function locationWhere(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  q: { state?: string; city?: string; radiusKm?: number },
+) {
+  if (!q.state) return null;
+  if (!q.city) return db`state = ${q.state}`;
+  if (!q.radiusKm) return db`state = ${q.state} and city = ${q.city}`;
+  const centre = areaCentre(q.state, q.city);
+  if (!centre) return db`false`;
+  const metres = q.radiusKm * 1000;
+  return db`lat is not null and earth_box(ll_to_earth(${centre.lat}, ${centre.lng}), ${metres}) @> ll_to_earth(lat, lng)
+            and earth_distance(ll_to_earth(${centre.lat}, ${centre.lng}), ll_to_earth(lat, lng)) <= ${metres}`;
+}
 
 export function registerListings(app: OpenAPIHono<AuthEnv>) {
   // ── POST /listings ─────────────────────────────────────────────────────────
@@ -176,6 +263,10 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           content: { "application/json": { schema: ListingSchema } },
         },
         401: { description: "Unauthorized" },
+        422: {
+          description: "Location is not a known state/area",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
         503: {
           description: "Database unavailable",
           content: { "application/json": { schema: ErrorSchema } },
@@ -188,13 +279,24 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const b = c.req.valid("json");
 
+      // Only canonical pairs are stored: a typo'd area would be invisible to
+      // every filter and facet while looking fine on the card.
+      if (b.state && !isState(b.state)) {
+        return c.json({ error: "unknown_state" }, 422);
+      }
+      if (b.city && !(b.state && areaCentre(b.state, b.city))) {
+        return c.json({ error: "unknown_city" }, 422);
+      }
       const rows = await db<Row[]>`
         insert into public.listings
-          (seller_id, category, title, description, price_kobo, negotiable, stock, condition, location)
+          (seller_id, category, title, description, price_kobo, negotiable, stock,
+           condition, location, state, city, lat, lng)
         values (
           ${user.sub}, ${b.category}, ${b.title}, ${b.description ?? null},
           ${b.priceKobo}, ${b.negotiable ?? true}, ${b.stock ?? 1},
-          ${b.condition ?? "used"}, ${b.location ?? null}
+          ${b.condition ?? "used"}, ${b.location ?? null},
+          ${b.state ?? null}, ${b.city ?? null},
+          ${b.lat ?? null}, ${b.lng ?? null}
         )
         returning ${db.unsafe(SELECT)}
       `;
@@ -211,6 +313,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       tags: ["listings"],
       request: {
         query: z.object({
+          ...LocationQuery,
           limit: z.coerce.number().int().min(1).max(50).optional(),
           cursor: z.string().datetime().optional(),
         }),
@@ -229,12 +332,14 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
     async (c) => {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
-      const { limit, cursor } = c.req.valid("query");
+      const { limit, cursor, ...loc } = c.req.valid("query");
       const take = limit ?? 20;
+      const place = locationWhere(db, loc);
 
       const rows = await db<Row[]>`
         select ${db.unsafe(SELECT)} from public.listings
         where status = 'active'
+          ${place ? db`and (${place})` : db``}
           ${cursor ? db`and created_at < ${cursor}` : db``}
         order by created_at desc
         limit ${take}
@@ -261,6 +366,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           minPrice: z.coerce.number().int().nonnegative().optional(),
           maxPrice: z.coerce.number().int().nonnegative().optional(),
           location: z.string().max(120).optional(),
+          ...LocationQuery,
           limit: z.coerce.number().int().min(1).max(50).optional(),
           offset: z.coerce.number().int().min(0).optional(),
         }),
@@ -279,10 +385,11 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
     async (c) => {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
-      const { q, category, condition, minPrice, maxPrice, location } =
+      const { q, category, condition, minPrice, maxPrice, location, ...rest } =
         c.req.valid("query");
       const limit = c.req.valid("query").limit ?? 20;
       const offset = c.req.valid("query").offset ?? 0;
+      const place = locationWhere(db, rest);
 
       // Compose the WHERE by nesting postgres.js fragments (all values bound).
       let where = db`status = 'active'`;
@@ -291,6 +398,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (minPrice != null) where = db`${where} and price_kobo >= ${minPrice}`;
       if (maxPrice != null) where = db`${where} and price_kobo <= ${maxPrice}`;
       if (location) where = db`${where} and location ilike ${"%" + location + "%"}`;
+      if (place) where = db`${where} and (${place})`;
       if (q)
         // FTS match OR a fuzzy word-similarity match on the title (typo tolerance;
         // word_similarity finds the best-matching word within the title, so a long
@@ -311,6 +419,65 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       const items = await Promise.all(rows.map(toListing));
       const nextOffset = rows.length === limit ? offset + limit : null;
       return c.json({ items, nextOffset }, 200);
+    },
+  );
+
+  // ── GET /listings/facets — the location tree, with counts ──────────────────
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/listings/facets",
+      summary: "States and areas with active-listing counts",
+      tags: ["listings"],
+      responses: {
+        200: {
+          description: "The canonical location tree with counts",
+          content: { "application/json": { schema: LocationFacetsSchema } },
+        },
+        503: {
+          description: "Database unavailable",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
+      },
+    }),
+    async (c) => {
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+
+      const rows = await db<{ state: string | null; city: string | null; n: number }[]>`
+        select state, city, count(*)::int as n
+        from public.listings
+        where status = 'active'
+        group by state, city
+      `;
+
+      const perState = new Map<string, number>();
+      const perCity = new Map<string, number>();
+      let total = 0;
+      for (const r of rows) {
+        total += r.n;
+        if (!r.state) continue; // unplaced: counts nationwide only
+        perState.set(r.state, (perState.get(r.state) ?? 0) + r.n);
+        if (r.city) {
+          const k = `${r.state} ${r.city}`;
+          perCity.set(k, (perCity.get(k) ?? 0) + r.n);
+        }
+      }
+
+      // Driven by the canonical list, not by what happens to have stock, so
+      // every state and area stays selectable (and postable) at zero.
+      const states = NG_REGIONS.map((region) => ({
+        state: region.state,
+        count: perState.get(region.state) ?? 0,
+        cities: region.areas.map((a) => ({
+          city: a.city,
+          count: perCity.get(`${region.state} ${a.city}`) ?? 0,
+          lat: a.lat,
+          lng: a.lng,
+        })),
+      }));
+
+      return c.json({ total, states }, 200);
     },
   );
 
@@ -401,6 +568,10 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         },
         401: { description: "Unauthorized" },
         404: { description: "Not found or not owner" },
+        422: {
+          description: "Location is not a known state/area",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
         503: {
           description: "Database unavailable",
           content: { "application/json": { schema: ErrorSchema } },
@@ -425,6 +596,20 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (b.condition !== undefined) cols.condition = b.condition;
       if (b.location !== undefined) cols.location = b.location;
       if (b.status !== undefined) cols.status = b.status;
+      // Moving a listing means moving both halves of the pair, and only to a
+      // canonical area — the create path holds the same line.
+      if (b.state !== undefined || b.city !== undefined) {
+        if (!b.state || !b.city || !areaCentre(b.state, b.city)) {
+          return c.json({ error: "unknown_city" }, 422);
+        }
+        const centre = areaCentre(b.state, b.city)!;
+        cols.state = b.state;
+        cols.city = b.city;
+        // Re-anchor the point to the new area unless the seller re-posts their
+        // own fix; a stale coordinate would put the listing in the wrong ring.
+        cols.lat = centre.lat;
+        cols.lng = centre.lng;
+      }
 
       if (Object.keys(cols).length === 0) {
         // Nothing to change — return the current row (owner-scoped).

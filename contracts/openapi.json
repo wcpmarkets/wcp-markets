@@ -158,6 +158,18 @@
               "null"
             ]
           },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -193,6 +205,8 @@
           "stock",
           "condition",
           "location",
+          "state",
+          "city",
           "status",
           "imageUrls",
           "createdAt",
@@ -238,6 +252,24 @@
           "location": {
             "type": "string",
             "maxLength": 120
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "lat": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "lng": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
           }
         },
         "required": [
@@ -288,6 +320,72 @@
           "nextOffset"
         ]
       },
+      "AreaFacet": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "city",
+          "count",
+          "lat",
+          "lng"
+        ]
+      },
+      "StateFacet": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AreaFacet"
+            }
+          }
+        },
+        "required": [
+          "state",
+          "count",
+          "cities"
+        ]
+      },
+      "LocationFacets": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StateFacet"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "states"
+        ]
+      },
       "ListingUpdate": {
         "type": "object",
         "properties": {
@@ -333,6 +431,14 @@
               "null"
             ],
             "maxLength": 120
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 64
           },
           "status": {
             "type": "string",
@@ -1219,6 +1325,16 @@
           "401": {
             "description": "Unauthorized"
           },
+          "422": {
+            "description": "Location is not a known state/area",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Database unavailable",
             "content": {
@@ -1237,6 +1353,34 @@
           "listings"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "required": false,
+            "name": "city",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "required": false,
+            "name": "radiusKm",
+            "in": "query"
+          },
           {
             "schema": {
               "type": "integer",
@@ -1354,6 +1498,34 @@
           },
           {
             "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "required": false,
+            "name": "city",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "required": false,
+            "name": "radiusKm",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 50
@@ -1382,6 +1554,36 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ListingSearchPage"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/listings/facets": {
+      "get": {
+        "summary": "States and areas with active-listing counts",
+        "tags": [
+          "listings"
+        ],
+        "responses": {
+          "200": {
+            "description": "The canonical location tree with counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationFacets"
                 }
               }
             }
@@ -1529,6 +1731,16 @@
           },
           "404": {
             "description": "Not found or not owner"
+          },
+          "422": {
+            "description": "Location is not a known state/area",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "503": {
             "description": "Database unavailable",
@@ -2815,8 +3027,28 @@
               }
             }
           },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "503": {
             "description": "Database unavailable",

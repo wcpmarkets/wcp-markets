@@ -161,6 +161,9 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    state?: string;
+                    city?: string;
+                    radiusKm?: number;
                     limit?: number;
                     cursor?: string;
                 };
@@ -221,6 +224,15 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description Location is not a known state/area */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Database unavailable */
                 503: {
                     headers: {
@@ -255,6 +267,9 @@ export interface paths {
                     minPrice?: number | null;
                     maxPrice?: number | null;
                     location?: string;
+                    state?: string;
+                    city?: string;
+                    radiusKm?: number;
                     limit?: number;
                     offset?: number | null;
                 };
@@ -271,6 +286,51 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ListingSearchPage"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/listings/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** States and areas with active-listing counts */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The canonical location tree with counts */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LocationFacets"];
                     };
                 };
                 /** @description Database unavailable */
@@ -433,6 +493,15 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Location is not a known state/area */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
                 /** @description Database unavailable */
                 503: {
@@ -1774,12 +1843,30 @@ export interface paths {
                         "application/json": components["schemas"]["KycStatus"];
                     };
                 };
+                /** @description Bad request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Unauthorized */
                 401: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
                 /** @description Database unavailable */
                 503: {
@@ -2017,6 +2104,8 @@ export interface components {
             /** @enum {string} */
             condition: "new" | "used" | "refurbished";
             location: string | null;
+            state: string | null;
+            city: string | null;
             /** @enum {string} */
             status: "draft" | "active" | "sold" | "archived";
             imageUrls: string[];
@@ -2033,6 +2122,10 @@ export interface components {
             /** @enum {string} */
             condition?: "new" | "used" | "refurbished";
             location?: string;
+            state?: string;
+            city?: string;
+            lat?: number;
+            lng?: number;
         };
         ListingPage: {
             items: components["schemas"]["Listing"][];
@@ -2041,6 +2134,21 @@ export interface components {
         ListingSearchPage: {
             items: components["schemas"]["Listing"][];
             nextOffset: number | null;
+        };
+        AreaFacet: {
+            city: string;
+            count: number;
+            lat: number;
+            lng: number;
+        };
+        StateFacet: {
+            state: string;
+            count: number;
+            cities: components["schemas"]["AreaFacet"][];
+        };
+        LocationFacets: {
+            total: number;
+            states: components["schemas"]["StateFacet"][];
         };
         ListingUpdate: {
             category?: string;
@@ -2052,6 +2160,8 @@ export interface components {
             /** @enum {string} */
             condition?: "new" | "used" | "refurbished";
             location?: string | null;
+            state?: string;
+            city?: string;
             /** @enum {string} */
             status?: "draft" | "active" | "sold" | "archived";
         };
