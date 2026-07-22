@@ -208,44 +208,55 @@ const SELECT = `id, seller_id, lane, category, title, description, price_kobo,
 const LocationQuery = {
   state: z.string().max(64).optional(),
   city: z.string().max(64).optional(),
+  /** "Near me": the buyer's own point, with radiusKm, as a scope in its own right. */
+  nearLat: z.coerce.number().min(-90).max(90).optional(),
+  nearLng: z.coerce.number().min(-180).max(180).optional(),
   radiusKm: z.coerce.number().int().min(1).max(500).optional(),
 };
 
 /**
- * Turn a (state, city, radiusKm) triple into a SQL predicate.
+ * Turn a location query into a SQL predicate. Four scopes, no overlap:
  *
- * - nothing            → nationwide
- * - state              → the whole state
- * - state + city       → that area
- * - state + city + km  → that area, further narrowed to what sits within the
- *                        distance of its centre. The radius never widens the
- *                        scope past the chosen area: it only tightens it, so a
- *                        buyer who says "Yaba" is never shown Lekki.
+ * - nothing                    → nationwide
+ * - state                      → the whole state
+ * - state + city               → that area
+ * - nearLat/nearLng + radiusKm → a ring around the buyer, wherever they are
+ *
+ * "Near me" is deliberately NOT a modifier on an area. Our second level is
+ * neighbourhoods — Gwarinpa is about 4 km across — so a ring anchored to an area
+ * either changes nothing (every radius contains the whole area) or overshoots it
+ * wildly (25 km around Yaba reaches Ikorodu). Distance only earns its place when
+ * it's measured from the person asking, which is a question the area tree can't
+ * answer at all. So it wins outright when supplied, and ignores state/city.
  *
  * A listing whose seller didn't share a point is anchored to its area centre, so
- * it's at distance zero and stays in every ring — the radius discriminates only
- * between listings that carry a real fix, which is the honest behaviour when
- * that's the only distance we actually know.
+ * "near me" places it within a kilometre or two of the truth — good enough for a
+ * ring, and the honest limit of what we know.
  *
  * An unknown state/area is not silently ignored: it narrows to nothing, because
  * quietly widening a filter the user set is worse than an empty result.
  */
 function locationWhere(
   db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
-  q: { state?: string; city?: string; radiusKm?: number },
+  q: {
+    state?: string;
+    city?: string;
+    nearLat?: number;
+    nearLng?: number;
+    radiusKm?: number;
+  },
 ) {
+  if (q.nearLat != null && q.nearLng != null && q.radiusKm) {
+    const metres = q.radiusKm * 1000;
+    // earth_box first so the GiST index does the coarse work; earth_distance
+    // then trims the box corners to a true circle.
+    return db`lat is not null
+              and earth_box(ll_to_earth(${q.nearLat}, ${q.nearLng}), ${metres}) @> ll_to_earth(lat, lng)
+              and earth_distance(ll_to_earth(${q.nearLat}, ${q.nearLng}), ll_to_earth(lat, lng)) <= ${metres}`;
+  }
   if (!q.state) return null;
   if (!q.city) return db`state = ${q.state}`;
-  const area = db`state = ${q.state} and city = ${q.city}`;
-  if (!q.radiusKm) return area;
-  const centre = areaCentre(q.state, q.city);
-  if (!centre) return db`false`;
-  const metres = q.radiusKm * 1000;
-  // earth_box first so the GiST index does the coarse work; earth_distance then
-  // trims the box corners to a true circle.
-  return db`${area} and lat is not null
-            and earth_box(ll_to_earth(${centre.lat}, ${centre.lng}), ${metres}) @> ll_to_earth(lat, lng)
-            and earth_distance(ll_to_earth(${centre.lat}, ${centre.lng}), ll_to_earth(lat, lng)) <= ${metres}`;
+  return db`state = ${q.state} and city = ${q.city}`;
 }
 
 export function registerListings(app: OpenAPIHono<AuthEnv>) {

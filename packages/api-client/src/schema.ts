@@ -163,6 +163,8 @@ export interface paths {
                 query?: {
                     state?: string;
                     city?: string;
+                    nearLat?: number | null;
+                    nearLng?: number | null;
                     radiusKm?: number;
                     limit?: number;
                     cursor?: string;
@@ -269,6 +271,8 @@ export interface paths {
                     location?: string;
                     state?: string;
                     city?: string;
+                    nearLat?: number | null;
+                    nearLng?: number | null;
                     radiusKm?: number;
                     limit?: number;
                     offset?: number | null;
