@@ -12,7 +12,9 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean",
-    "gen": "pnpm --filter @wcp/api gen:openapi && pnpm --filter @wcp/api gen:deal-guard && pnpm --filter @wcp/api-client gen"
+    "gen": "pnpm --filter @wcp/api gen:openapi && pnpm --filter @wcp/api gen:deal-guard && pnpm --filter @wcp/api-client gen",
+    "build:lambdas": "pnpm --filter @wcp/api build:lambda && pnpm --filter @wcp/api build:sweeper && pnpm --filter @wcp/api build:consumer",
+    "deploy": "pnpm build:lambdas && terraform -chdir=infra apply"
   },
   "devDependencies": {
     "turbo": "^2.5.5",

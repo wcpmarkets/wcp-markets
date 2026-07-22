@@ -12,6 +12,11 @@
  * roughly a kilometre — ample for a 5–25 km ring, and never precise enough to
  * locate anyone. Add areas freely; the only rule is that a name is stable once
  * shipped, because listings store it.
+ *
+ * CHANGING THIS FILE? The Android app carries a generated copy for offline use
+ * (assets/ng-regions.json). Regenerate it, or the picker will disagree with the
+ * server whenever the network is down:
+ *   cd ../wcp-markets-android && npx tsx tools/gen-regions.ts
  */
 
 export type Area = { city: string; lat: number; lng: number };
