@@ -66,8 +66,10 @@ const ListingCreateSchema = z
     // seller's own coarse fix — the only thing that makes a distance ring real.
     state: z.string().max(64).optional(),
     city: z.string().max(64).optional(),
-    lat: z.number().min(-90).max(90).optional(),
-    lng: z.number().min(-180).max(180).optional(),
+    // format:double so generated clients emit a JSON number, not a BigDecimal
+    // string (the client's BigDecimal adapter stringifies, which z.number rejects).
+    lat: z.number().min(-90).max(90).openapi({ format: "double" }).optional(),
+    lng: z.number().min(-180).max(180).openapi({ format: "double" }).optional(),
   })
   .openapi("ListingCreate");
 

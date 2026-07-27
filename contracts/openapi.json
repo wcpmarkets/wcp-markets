@@ -264,12 +264,14 @@
           "lat": {
             "type": "number",
             "minimum": -90,
-            "maximum": 90
+            "maximum": 90,
+            "format": "double"
           },
           "lng": {
             "type": "number",
             "minimum": -180,
-            "maximum": 180
+            "maximum": 180,
+            "format": "double"
           }
         },
         "required": [

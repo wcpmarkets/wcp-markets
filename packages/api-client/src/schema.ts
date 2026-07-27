@@ -2128,7 +2128,9 @@ export interface components {
             location?: string;
             state?: string;
             city?: string;
+            /** Format: double */
             lat?: number;
+            /** Format: double */
             lng?: number;
         };
         ListingPage: {
