@@ -18,6 +18,9 @@ import {
 
 const CONDITIONS = ["new", "used", "refurbished"] as const;
 const STATUSES = ["draft", "active", "sold", "archived"] as const;
+const LANES = ["goods", "property"] as const;
+const PROPERTY_TYPES = ["apartment", "house", "land", "commercial", "shop", "office"] as const;
+const DEAL_TYPES = ["rent", "sale"] as const;
 const IMAGE_TYPES = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -27,11 +30,23 @@ const IMAGE_TYPES = {
 // ── Schemas (all named → clean TS/Kotlin/Swift codegen) ──────────────────────
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 
+// Lane-specific facets (a JSON attribute set). All optional here; the API requires
+// the right ones per lane (see the create/update handlers). Property: type,
+// rent|sale, beds, baths. Other lanes add their own fields as they land.
+const ListingAttributesSchema = z
+  .object({
+    propertyType: z.enum(PROPERTY_TYPES).optional(),
+    dealType: z.enum(DEAL_TYPES).optional(),
+    beds: z.number().int().min(0).max(50).optional(),
+    baths: z.number().int().min(0).max(50).optional(),
+  })
+  .openapi("ListingAttributes");
+
 const ListingSchema = z
   .object({
     id: z.string().uuid(),
     sellerId: z.string().uuid(),
-    lane: z.literal("goods"),
+    lane: z.enum(LANES),
     category: z.string(),
     title: z.string(),
     description: z.string().nullable(),
@@ -40,6 +55,7 @@ const ListingSchema = z
     negotiable: z.boolean(),
     stock: z.number().int().nonnegative(),
     condition: z.enum(CONDITIONS),
+    attributes: ListingAttributesSchema,
     location: z.string().nullable(),
     // Structured location. `location` stays as the seller's own words (shown on
     // the card); these two are what browsing groups and filters by.
@@ -54,6 +70,8 @@ const ListingSchema = z
 
 const ListingCreateSchema = z
   .object({
+    // Omit for Goods (defaults). Property requires attributes (validated in the handler).
+    lane: z.enum(LANES).default("goods"),
     category: z.string().min(1).max(64),
     title: z.string().min(1).max(140),
     description: z.string().max(4000).optional(),
@@ -61,6 +79,7 @@ const ListingCreateSchema = z
     negotiable: z.boolean().optional(),
     stock: z.number().int().nonnegative().optional(),
     condition: z.enum(CONDITIONS).optional(),
+    attributes: ListingAttributesSchema.optional(),
     location: z.string().max(120).optional(),
     // Must be a canonical state/area pair (see ng-regions). lat/lng is the
     // seller's own coarse fix — the only thing that makes a distance ring real.
@@ -157,6 +176,7 @@ type Row = {
   negotiable: boolean;
   stock: number;
   condition: (typeof CONDITIONS)[number];
+  attributes: Record<string, unknown> | null;
   location: string | null;
   state: string | null;
   city: string | null;
@@ -182,7 +202,7 @@ async function toListing(r: Row): Promise<z.infer<typeof ListingSchema>> {
   return {
     id: r.id,
     sellerId: r.seller_id,
-    lane: "goods",
+    lane: r.lane as (typeof LANES)[number],
     category: r.category,
     title: r.title,
     description: r.description,
@@ -191,6 +211,7 @@ async function toListing(r: Row): Promise<z.infer<typeof ListingSchema>> {
     negotiable: r.negotiable,
     stock: r.stock,
     condition: r.condition,
+    attributes: (r.attributes ?? {}) as z.infer<typeof ListingAttributesSchema>,
     location: r.location,
     state: r.state,
     city: r.city,
@@ -202,7 +223,7 @@ async function toListing(r: Row): Promise<z.infer<typeof ListingSchema>> {
 }
 
 const SELECT = `id, seller_id, lane, category, title, description, price_kobo,
-  currency, negotiable, stock, condition, location, state, city, image_paths,
+  currency, negotiable, stock, condition, attributes, location, state, city, image_paths,
   status, created_at, updated_at`;
 
 /** Query params every browse surface shares, so /listings and /listings/search
@@ -307,6 +328,11 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (b.city && !centre) {
         return c.json({ error: "unknown_city" }, 422);
       }
+      // Property must say what it is and whether it's to rent or buy — those two
+      // drive the whole browse/display shell for the lane.
+      if (b.lane === "property" && (!b.attributes?.propertyType || !b.attributes?.dealType)) {
+        return c.json({ error: "property_needs_type_and_deal" }, 422);
+      }
       // A seller who won't share their location still gets placed, at the centre
       // of the area they chose. Without this they'd be tagged to an area but fall
       // out of every ring drawn around it, which reads as a bug.
@@ -314,13 +340,13 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       const lng = b.lng ?? centre?.lng ?? null;
       const rows = await db<Row[]>`
         insert into public.listings
-          (seller_id, category, title, description, price_kobo, negotiable, stock,
-           condition, location, state, city, lat, lng)
+          (seller_id, lane, category, title, description, price_kobo, negotiable, stock,
+           condition, attributes, location, state, city, lat, lng)
         values (
-          ${user.sub}, ${b.category}, ${b.title}, ${b.description ?? null},
+          ${user.sub}, ${b.lane}, ${b.category}, ${b.title}, ${b.description ?? null},
           ${b.priceKobo}, ${b.negotiable ?? true}, ${b.stock ?? 1},
-          ${b.condition ?? "used"}, ${b.location ?? null},
-          ${b.state ?? null}, ${b.city ?? null}, ${lat}, ${lng}
+          ${b.condition ?? "used"}, ${db.json(b.attributes ?? {})},
+          ${b.location ?? null}, ${b.state ?? null}, ${b.city ?? null}, ${lat}, ${lng}
         )
         returning ${db.unsafe(SELECT)}
       `;
@@ -338,6 +364,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       request: {
         query: z.object({
           ...LocationQuery,
+          lane: z.enum(LANES).optional(),
           limit: z.coerce.number().int().min(1).max(50).optional(),
           cursor: z.string().datetime().optional(),
         }),
@@ -356,13 +383,14 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
     async (c) => {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
-      const { limit, cursor, ...loc } = c.req.valid("query");
+      const { limit, cursor, lane, ...loc } = c.req.valid("query");
       const take = limit ?? 20;
       const place = locationWhere(db, loc);
 
       const rows = await db<Row[]>`
         select ${db.unsafe(SELECT)} from public.listings
         where status = 'active'
+          ${lane ? db`and lane = ${lane}` : db``}
           ${place ? db`and (${place})` : db``}
           ${cursor ? db`and created_at < ${cursor}` : db``}
         order by created_at desc
@@ -385,6 +413,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       request: {
         query: z.object({
           q: z.string().max(120).optional(),
+          lane: z.enum(LANES).optional(),
           category: z.string().max(64).optional(),
           condition: z.enum(CONDITIONS).optional(),
           minPrice: z.coerce.number().int().nonnegative().optional(),
@@ -409,7 +438,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
     async (c) => {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
-      const { q, category, condition, minPrice, maxPrice, location, ...rest } =
+      const { q, lane, category, condition, minPrice, maxPrice, location, ...rest } =
         c.req.valid("query");
       const limit = c.req.valid("query").limit ?? 20;
       const offset = c.req.valid("query").offset ?? 0;
@@ -417,6 +446,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
 
       // Compose the WHERE by nesting postgres.js fragments (all values bound).
       let where = db`status = 'active'`;
+      if (lane) where = db`${where} and lane = ${lane}`;
       if (category) where = db`${where} and category = ${category}`;
       if (condition) where = db`${where} and condition = ${condition}`;
       if (minPrice != null) where = db`${where} and price_kobo >= ${minPrice}`;

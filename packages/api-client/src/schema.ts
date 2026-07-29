@@ -166,6 +166,7 @@ export interface paths {
                     nearLat?: number | null;
                     nearLng?: number | null;
                     radiusKm?: number;
+                    lane?: "goods" | "property";
                     limit?: number;
                     cursor?: string;
                 };
@@ -264,6 +265,7 @@ export interface paths {
             parameters: {
                 query?: {
                     q?: string;
+                    lane?: "goods" | "property";
                     category?: string;
                     condition?: "new" | "used" | "refurbished";
                     minPrice?: number | null;
@@ -2090,13 +2092,21 @@ export interface components {
         OtpRequest: {
             phone: string;
         };
+        ListingAttributes: {
+            /** @enum {string} */
+            propertyType?: "apartment" | "house" | "land" | "commercial" | "shop" | "office";
+            /** @enum {string} */
+            dealType?: "rent" | "sale";
+            beds?: number;
+            baths?: number;
+        };
         Listing: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             sellerId: string;
             /** @enum {string} */
-            lane: "goods";
+            lane: "goods" | "property";
             category: string;
             title: string;
             description: string | null;
@@ -2107,6 +2117,7 @@ export interface components {
             stock: number;
             /** @enum {string} */
             condition: "new" | "used" | "refurbished";
+            attributes: components["schemas"]["ListingAttributes"];
             location: string | null;
             state: string | null;
             city: string | null;
@@ -2117,6 +2128,11 @@ export interface components {
             updatedAt: string;
         };
         ListingCreate: {
+            /**
+             * @default goods
+             * @enum {string}
+             */
+            lane: "goods" | "property";
             category: string;
             title: string;
             description?: string;
@@ -2125,6 +2141,7 @@ export interface components {
             stock?: number;
             /** @enum {string} */
             condition?: "new" | "used" | "refurbished";
+            attributes?: components["schemas"]["ListingAttributes"];
             location?: string;
             state?: string;
             city?: string;

@@ -98,6 +98,39 @@
           "phone"
         ]
       },
+      "ListingAttributes": {
+        "type": "object",
+        "properties": {
+          "propertyType": {
+            "type": "string",
+            "enum": [
+              "apartment",
+              "house",
+              "land",
+              "commercial",
+              "shop",
+              "office"
+            ]
+          },
+          "dealType": {
+            "type": "string",
+            "enum": [
+              "rent",
+              "sale"
+            ]
+          },
+          "beds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          },
+          "baths": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          }
+        }
+      },
       "Listing": {
         "type": "object",
         "properties": {
@@ -112,7 +145,8 @@
           "lane": {
             "type": "string",
             "enum": [
-              "goods"
+              "goods",
+              "property"
             ]
           },
           "category": {
@@ -151,6 +185,9 @@
               "used",
               "refurbished"
             ]
+          },
+          "attributes": {
+            "$ref": "#/components/schemas/ListingAttributes"
           },
           "location": {
             "type": [
@@ -204,6 +241,7 @@
           "negotiable",
           "stock",
           "condition",
+          "attributes",
           "location",
           "state",
           "city",
@@ -216,6 +254,14 @@
       "ListingCreate": {
         "type": "object",
         "properties": {
+          "lane": {
+            "type": "string",
+            "enum": [
+              "goods",
+              "property"
+            ],
+            "default": "goods"
+          },
           "category": {
             "type": "string",
             "minLength": 1,
@@ -248,6 +294,9 @@
               "used",
               "refurbished"
             ]
+          },
+          "attributes": {
+            "$ref": "#/components/schemas/ListingAttributes"
           },
           "location": {
             "type": "string",
@@ -1411,6 +1460,18 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "goods",
+                "property"
+              ]
+            },
+            "required": false,
+            "name": "lane",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 50
@@ -1467,6 +1528,18 @@
             },
             "required": false,
             "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "goods",
+                "property"
+              ]
+            },
+            "required": false,
+            "name": "lane",
             "in": "query"
           },
           {
