@@ -631,6 +631,82 @@
           "state"
         ]
       },
+      "Viewing": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "proposedBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "startsAt": {
+            "type": "string"
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "place": {
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "confirmed",
+              "cancelled",
+              "superseded"
+            ]
+          },
+          "confirmedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cancelledBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversationId",
+          "proposedBy",
+          "startsAt",
+          "endsAt",
+          "place",
+          "note",
+          "status",
+          "confirmedAt",
+          "cancelledBy",
+          "createdAt"
+        ]
+      },
       "Conversation": {
         "type": "object",
         "properties": {
@@ -664,6 +740,9 @@
           "blocked": {
             "type": "boolean"
           },
+          "viewing": {
+            "$ref": "#/components/schemas/Viewing"
+          },
           "createdAt": {
             "type": "string"
           }
@@ -677,6 +756,7 @@
           "unreadCount",
           "deal",
           "blocked",
+          "viewing",
           "createdAt"
         ]
       },
@@ -986,6 +1066,217 @@
           "action"
         ]
       },
+      "VehicleModel": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "enum": [
+              "saloon",
+              "suv",
+              "hatchback",
+              "bus",
+              "pickup",
+              "coupe",
+              "minivan",
+              "truck"
+            ]
+          },
+          "fuel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "petrol",
+              "diesel",
+              "hybrid",
+              "electric"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "body",
+          "fuel"
+        ]
+      },
+      "VehicleMake": {
+        "type": "object",
+        "properties": {
+          "make": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VehicleModel"
+            }
+          }
+        },
+        "required": [
+          "make",
+          "models"
+        ]
+      },
+      "VehicleCatalog": {
+        "type": "object",
+        "properties": {
+          "makes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VehicleMake"
+            }
+          },
+          "otherMake": {
+            "type": "string"
+          },
+          "minYear": {
+            "type": "integer"
+          },
+          "maxYear": {
+            "type": "integer"
+          },
+          "transmissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "manual"
+              ]
+            }
+          },
+          "fuels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "petrol",
+                "diesel",
+                "hybrid",
+                "electric"
+              ]
+            }
+          },
+          "bodies": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "saloon",
+                "suv",
+                "hatchback",
+                "bus",
+                "pickup",
+                "coupe",
+                "minivan",
+                "truck"
+              ]
+            }
+          },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "brand_new",
+                "foreign_used",
+                "nigerian_used"
+              ]
+            }
+          },
+          "registrations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "registered",
+                "unregistered",
+                "custom_papers"
+              ]
+            }
+          }
+        },
+        "required": [
+          "makes",
+          "otherMake",
+          "minYear",
+          "maxYear",
+          "transmissions",
+          "fuels",
+          "bodies",
+          "conditions",
+          "registrations"
+        ]
+      },
+      "VehiclePriceInsight": {
+        "type": "object",
+        "properties": {
+          "comparables": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "medianKobo": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "below",
+              "fair",
+              "above"
+            ]
+          },
+          "deltaKobo": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "comparables",
+          "medianKobo",
+          "verdict",
+          "deltaKobo"
+        ]
+      },
+      "ViewingCreate": {
+        "type": "object",
+        "properties": {
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "place": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "startsAt",
+          "place"
+        ]
+      },
       "OtpRequested": {
         "type": "object",
         "properties": {
@@ -1042,6 +1333,69 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 50
+          },
+          "make": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "year": {
+            "type": "integer"
+          },
+          "mileageKm": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000000
+          },
+          "transmission": {
+            "type": "string",
+            "enum": [
+              "automatic",
+              "manual"
+            ]
+          },
+          "fuel": {
+            "type": "string",
+            "enum": [
+              "petrol",
+              "diesel",
+              "hybrid",
+              "electric"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "enum": [
+              "saloon",
+              "suv",
+              "hatchback",
+              "bus",
+              "pickup",
+              "coupe",
+              "minivan",
+              "truck"
+            ]
+          },
+          "vehicleCondition": {
+            "type": "string",
+            "enum": [
+              "brand_new",
+              "foreign_used",
+              "nigerian_used"
+            ]
+          },
+          "registration": {
+            "type": "string",
+            "enum": [
+              "registered",
+              "unregistered",
+              "custom_papers"
+            ]
           }
         }
       },
@@ -1063,7 +1417,8 @@
             "type": "string",
             "enum": [
               "goods",
-              "property"
+              "property",
+              "vehicles"
             ]
           },
           "category": {
@@ -1178,7 +1533,8 @@
             "type": "string",
             "enum": [
               "goods",
-              "property"
+              "property",
+              "vehicles"
             ],
             "default": "goods"
           },
@@ -3410,6 +3766,416 @@
         }
       }
     },
+    "/vehicles/catalog": {
+      "get": {
+        "summary": "Makes, models (with body/fuel prefill) and the lane's vocabularies",
+        "tags": [
+          "vehicles"
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehicleCatalog"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/vehicles/price-insight": {
+      "get": {
+        "summary": "How an asking price compares with active listings of the same make/model/year band",
+        "tags": [
+          "vehicles"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "required": true,
+            "name": "make",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "required": true,
+            "name": "model",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "year",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "priceKobo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "excludeListingId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Insight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehiclePriceInsight"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{id}/viewings": {
+      "get": {
+        "summary": "Viewings logged in a conversation (party only), newest first",
+        "tags": [
+          "viewings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Viewings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Viewing"
+                      },
+                      {
+                        "type": "object"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Propose a viewing time and place; replaces any live viewing in the thread",
+        "tags": [
+          "viewings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ViewingCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Proposed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Viewing"
+                    },
+                    {
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Start in the past or too far ahead, or a bad window",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/viewings/{id}/confirm": {
+      "post": {
+        "summary": "Confirm a proposed viewing (the party who did NOT propose it)",
+        "tags": [
+          "viewings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Viewing"
+                    },
+                    {
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Own proposal, or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Not open for confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/viewings/{id}/cancel": {
+      "post": {
+        "summary": "Cancel a live viewing (either party)",
+        "tags": [
+          "viewings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Viewing"
+                    },
+                    {
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Already cancelled or replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/otp/request": {
       "post": {
         "summary": "Request a phone OTP (rate-limited)",
@@ -3590,7 +4356,8 @@
               "type": "string",
               "enum": [
                 "goods",
-                "property"
+                "property",
+                "vehicles"
               ]
             },
             "required": false,
@@ -3662,7 +4429,8 @@
               "type": "string",
               "enum": [
                 "goods",
-                "property"
+                "property",
+                "vehicles"
               ]
             },
             "required": false,
@@ -3776,6 +4544,143 @@
             },
             "required": false,
             "name": "radiusKm",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "required": false,
+            "name": "make",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "required": false,
+            "name": "model",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "minYear",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "maxYear",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "maxMileageKm",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "manual"
+              ]
+            },
+            "required": false,
+            "name": "transmission",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "petrol",
+                "diesel",
+                "hybrid",
+                "electric"
+              ]
+            },
+            "required": false,
+            "name": "fuel",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "saloon",
+                "suv",
+                "hatchback",
+                "bus",
+                "pickup",
+                "coupe",
+                "minivan",
+                "truck"
+              ]
+            },
+            "required": false,
+            "name": "body",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "brand_new",
+                "foreign_used",
+                "nigerian_used"
+              ]
+            },
+            "required": false,
+            "name": "vehicleCondition",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "registered",
+                "unregistered",
+                "custom_papers"
+              ]
+            },
+            "required": false,
+            "name": "registration",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "relevance",
+                "price_asc",
+                "price_desc",
+                "newest",
+                "mileage_asc"
+              ]
+            },
+            "required": false,
+            "name": "sort",
             "in": "query"
           },
           {

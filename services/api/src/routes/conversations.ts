@@ -5,6 +5,7 @@ import { getDb } from "../db.js";
 import type { Sql } from "../deals/commands.js";
 import { LISTING_IMAGES_BUCKET, createSignedDownloadUrl } from "../supabase.js";
 import { UserSummarySchema, isBlockedEitherWay, userSummaries } from "../profiles/summary.js";
+import { ViewingSchema, toViewing, type ViewingRow } from "./viewings.js";
 
 /**
  * Phase 3 A — conversations: one thread per (listing, buyer), opened from a listing's
@@ -52,6 +53,8 @@ const ConversationSchema = z
     /** The most recent deal on this listing between these two, if any. */
     deal: z.object({ id: z.string().uuid(), state: z.string() }).nullable().openapi("ConversationDeal"),
     blocked: z.boolean(),
+    /** The live (proposed or confirmed) viewing in this thread, if any (0024). */
+    viewing: ViewingSchema.nullable(),
     createdAt: z.string(),
   })
   .openapi("Conversation");
@@ -91,6 +94,7 @@ type ConvRow = {
   deal_id: string | null;
   deal_state: string | null;
   blocked: boolean;
+  viewing: ViewingRow | null;
 };
 
 /** One query for both the inbox and a single conversation. `me` scopes unread + role. */
@@ -107,7 +111,10 @@ function convQuery(db: Sql, me: string) {
       d.id as deal_id, d.state as deal_state,
       exists (select 1 from public.blocks b
         where (b.blocker_id = c.buyer_id and b.blocked_id = c.seller_id)
-           or (b.blocker_id = c.seller_id and b.blocked_id = c.buyer_id)) as blocked
+           or (b.blocker_id = c.seller_id and b.blocked_id = c.buyer_id)) as blocked,
+      (select to_jsonb(v) from public.viewings v
+        where v.conversation_id = c.id and v.status in ('proposed', 'confirmed')
+        limit 1) as viewing
     from public.conversations c
     join public.listings l on l.id = c.listing_id
     left join lateral (
@@ -149,6 +156,7 @@ async function toConversations(db: Sql, me: string, rows: ConvRow[]) {
         unreadCount: r.unread,
         deal: r.deal_id && r.deal_state ? { id: r.deal_id, state: r.deal_state } : null,
         blocked: r.blocked,
+        viewing: r.viewing ? toViewing(r.viewing) : null,
         createdAt: iso(r.created_at),
       };
     }),

@@ -138,6 +138,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       });
       if (!r.ok) {
         if (r.code === "own_listing") return c.json({ error: "cannot_offer_own_listing" }, 400);
+        if (r.code === "lead_gen_lane") return c.json({ error: "lead_gen_lane" }, 409);
         return c.json({ error: "listing_unavailable" }, 409);
       }
       return c.json(toDeal(r.deal, user.sub), 201);

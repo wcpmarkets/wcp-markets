@@ -1306,6 +1306,379 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vehicles/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Makes, models (with body/fuel prefill) and the lane's vocabularies */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Catalogue */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VehicleCatalog"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vehicles/price-insight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How an asking price compares with active listings of the same make/model/year band */
+        get: {
+            parameters: {
+                query: {
+                    make: string;
+                    model: string;
+                    year?: number | null;
+                    priceKobo?: number | null;
+                    excludeListingId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Insight */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VehiclePriceInsight"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{id}/viewings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Viewings logged in a conversation (party only), newest first */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Viewings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": (components["schemas"]["Viewing"] & Record<string, never>)[];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Propose a viewing time and place; replaces any live viewing in the thread */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ViewingCreate"];
+                };
+            };
+            responses: {
+                /** @description Proposed */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Viewing"] & Record<string, never>;
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Blocked */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Start in the past or too far ahead, or a bad window */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/viewings/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm a proposed viewing (the party who did NOT propose it) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Confirmed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Viewing"] & Record<string, never>;
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Own proposal, or blocked */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not open for confirmation */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/viewings/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a live viewing (either party) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Cancelled */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Viewing"] & Record<string, never>;
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Already cancelled or replaced */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/otp/request": {
         parameters: {
             query?: never;
@@ -1389,7 +1762,7 @@ export interface paths {
                     nearLat?: number | null;
                     nearLng?: number | null;
                     radiusKm?: number;
-                    lane?: "goods" | "property";
+                    lane?: "goods" | "property" | "vehicles";
                     limit?: number;
                     cursor?: string;
                 };
@@ -1488,7 +1861,7 @@ export interface paths {
             parameters: {
                 query?: {
                     q?: string;
-                    lane?: "goods" | "property";
+                    lane?: "goods" | "property" | "vehicles";
                     category?: string;
                     condition?: "new" | "used" | "refurbished";
                     minPrice?: number | null;
@@ -1499,6 +1872,17 @@ export interface paths {
                     nearLat?: number | null;
                     nearLng?: number | null;
                     radiusKm?: number;
+                    make?: string;
+                    model?: string;
+                    minYear?: number | null;
+                    maxYear?: number | null;
+                    maxMileageKm?: number | null;
+                    transmission?: "automatic" | "manual";
+                    fuel?: "petrol" | "diesel" | "hybrid" | "electric";
+                    body?: "saloon" | "suv" | "hatchback" | "bus" | "pickup" | "coupe" | "minivan" | "truck";
+                    vehicleCondition?: "brand_new" | "foreign_used" | "nigerian_used";
+                    registration?: "registered" | "unregistered" | "custom_papers";
+                    sort?: "relevance" | "price_asc" | "price_desc" | "newest" | "mileage_asc";
                     limit?: number;
                     offset?: number | null;
                 };
@@ -3460,6 +3844,24 @@ export interface components {
             id: string;
             state: string;
         } | null;
+        Viewing: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            conversationId: string;
+            /** Format: uuid */
+            proposedBy: string;
+            startsAt: string;
+            endsAt: string | null;
+            place: string;
+            note: string | null;
+            /** @enum {string} */
+            status: "proposed" | "confirmed" | "cancelled" | "superseded";
+            confirmedAt: string | null;
+            /** Format: uuid */
+            cancelledBy: string | null;
+            createdAt: string;
+        } | null;
         Conversation: {
             /** Format: uuid */
             id: string;
@@ -3471,6 +3873,7 @@ export interface components {
             unreadCount: number;
             deal: components["schemas"]["ConversationDeal"];
             blocked: boolean;
+            viewing: components["schemas"]["Viewing"];
             createdAt: string;
         };
         ConversationPage: {
@@ -3551,6 +3954,43 @@ export interface components {
             action: "dismiss" | "remove_listing" | "uphold";
             note?: string;
         };
+        VehicleModel: {
+            name: string;
+            /** @enum {string} */
+            body: "saloon" | "suv" | "hatchback" | "bus" | "pickup" | "coupe" | "minivan" | "truck";
+            /** @enum {string|null} */
+            fuel: "petrol" | "diesel" | "hybrid" | "electric" | null;
+        };
+        VehicleMake: {
+            make: string;
+            models: components["schemas"]["VehicleModel"][];
+        };
+        VehicleCatalog: {
+            makes: components["schemas"]["VehicleMake"][];
+            otherMake: string;
+            minYear: number;
+            maxYear: number;
+            transmissions: ("automatic" | "manual")[];
+            fuels: ("petrol" | "diesel" | "hybrid" | "electric")[];
+            bodies: ("saloon" | "suv" | "hatchback" | "bus" | "pickup" | "coupe" | "minivan" | "truck")[];
+            conditions: ("brand_new" | "foreign_used" | "nigerian_used")[];
+            registrations: ("registered" | "unregistered" | "custom_papers")[];
+        };
+        VehiclePriceInsight: {
+            comparables: number;
+            medianKobo: number | null;
+            /** @enum {string|null} */
+            verdict: "below" | "fair" | "above" | null;
+            deltaKobo: number | null;
+        };
+        ViewingCreate: {
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt?: string;
+            place: string;
+            note?: string;
+        };
         OtpRequested: {
             /** @enum {string} */
             status: "sent";
@@ -3565,6 +4005,20 @@ export interface components {
             dealType?: "rent" | "sale";
             beds?: number;
             baths?: number;
+            make?: string;
+            model?: string;
+            year?: number;
+            mileageKm?: number;
+            /** @enum {string} */
+            transmission?: "automatic" | "manual";
+            /** @enum {string} */
+            fuel?: "petrol" | "diesel" | "hybrid" | "electric";
+            /** @enum {string} */
+            body?: "saloon" | "suv" | "hatchback" | "bus" | "pickup" | "coupe" | "minivan" | "truck";
+            /** @enum {string} */
+            vehicleCondition?: "brand_new" | "foreign_used" | "nigerian_used";
+            /** @enum {string} */
+            registration?: "registered" | "unregistered" | "custom_papers";
         };
         Listing: {
             /** Format: uuid */
@@ -3573,7 +4027,7 @@ export interface components {
             sellerId: string;
             seller: components["schemas"]["UserSummary"];
             /** @enum {string} */
-            lane: "goods" | "property";
+            lane: "goods" | "property" | "vehicles";
             category: string;
             title: string;
             description: string | null;
@@ -3599,7 +4053,7 @@ export interface components {
              * @default goods
              * @enum {string}
              */
-            lane: "goods" | "property";
+            lane: "goods" | "property" | "vehicles";
             category: string;
             title: string;
             description?: string;

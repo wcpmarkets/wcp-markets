@@ -47,7 +47,7 @@ export type CommandResult =
 
 export type CreateResult =
   | { ok: true; deal: DealRow; existing?: boolean }
-  | { ok: false; code: "listing_unavailable" | "own_listing" };
+  | { ok: false; code: "listing_unavailable" | "own_listing" | "lead_gen_lane" };
 
 /** Set/refresh the single active deadline for a deal's new state, or clear it. */
 async function syncDeadline(sql: Tx, dealId: string, state: DealState, token: string) {
@@ -71,10 +71,12 @@ export async function createOffer(
 ): Promise<CreateResult> {
   return db.begin(async (sql) => {
     // Lock the listing so concurrent genesis on the same listing serialise.
-    const [listing] = await sql<{ seller_id: string; status: string }[]>`
-      select seller_id, status from public.listings where id = ${p.listingId} for update
+    const [listing] = await sql<{ seller_id: string; status: string; lane: string }[]>`
+      select seller_id, status, lane from public.listings where id = ${p.listingId} for update
     `;
     if (!listing || listing.status !== "active") return { ok: false, code: "listing_unavailable" };
+    // Vehicles are lead-gen (22b): enquire, inspect, pay the dealer offline — no escrow.
+    if (listing.lane === "vehicles") return { ok: false, code: "lead_gen_lane" };
     if (listing.seller_id === p.buyerId) return { ok: false, code: "own_listing" };
 
     // One active negotiation per (listing, buyer): dedupes double-taps + reopens.

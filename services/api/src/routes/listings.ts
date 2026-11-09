@@ -4,6 +4,16 @@ import { auth, type AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import { NG_REGIONS, areaCentre, isState } from "../data/ng-regions.js";
 import {
+  BODIES,
+  FUELS,
+  MIN_YEAR,
+  REGISTRATIONS,
+  TRANSMISSIONS,
+  VEHICLE_CONDITIONS,
+  isKnownMake,
+  maxYear,
+} from "../data/vehicles.js";
+import {
   LISTING_IMAGES_BUCKET,
   createSignedDownloadUrl,
   createSignedUploadUrl,
@@ -28,7 +38,7 @@ const SELLER_STATUSES = ["draft", "active", "sold", "archived"] as const;
  */
 const STATUSES = [...SELLER_STATUSES, "under_review", "removed"] as const;
 const MODERATED: readonly string[] = ["under_review", "removed"];
-const LANES = ["goods", "property"] as const;
+const LANES = ["goods", "property", "vehicles"] as const;
 const PROPERTY_TYPES = ["apartment", "house", "land", "commercial", "shop", "office"] as const;
 const DEAL_TYPES = ["rent", "sale"] as const;
 const IMAGE_TYPES = {
@@ -41,16 +51,37 @@ const IMAGE_TYPES = {
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 
 // Lane-specific facets (a JSON attribute set). All optional here; the API requires
-// the right ones per lane (see the create/update handlers). Property: type,
-// rent|sale, beds, baths. Other lanes add their own fields as they land.
+// the right ones per lane (see the create handler). Property: type, rent|sale,
+// beds, baths. Vehicles: make, model, year, mileage, transmission, fuel, body,
+// condition, registration (design 13h).
 const ListingAttributesSchema = z
   .object({
     propertyType: z.enum(PROPERTY_TYPES).optional(),
     dealType: z.enum(DEAL_TYPES).optional(),
     beds: z.number().int().min(0).max(50).optional(),
     baths: z.number().int().min(0).max(50).optional(),
+    make: z.string().trim().min(1).max(40).optional(),
+    model: z.string().trim().min(1).max(40).optional(),
+    year: z.number().int().optional(),
+    mileageKm: z.number().int().min(0).max(2_000_000).optional(),
+    transmission: z.enum(TRANSMISSIONS).optional(),
+    fuel: z.enum(FUELS).optional(),
+    body: z.enum(BODIES).optional(),
+    vehicleCondition: z.enum(VEHICLE_CONDITIONS).optional(),
+    registration: z.enum(REGISTRATIONS).optional(),
   })
   .openapi("ListingAttributes");
+
+/** Vehicles must carry every facet the lane's cards, filters and detail show. */
+function vehicleProblem(a: z.infer<typeof ListingAttributesSchema> | undefined): string | null {
+  if (!a?.make || !a.model || a.year == null || a.mileageKm == null || !a.transmission || !a.fuel ||
+      !a.body || !a.vehicleCondition || !a.registration) {
+    return "vehicle_needs_details";
+  }
+  if (!isKnownMake(a.make)) return "unknown_make";
+  if (a.year < MIN_YEAR || a.year > maxYear()) return "invalid_year";
+  return null;
+}
 
 const ListingSchema = z
   .object({
@@ -352,6 +383,12 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (b.lane === "property" && (!b.attributes?.propertyType || !b.attributes?.dealType)) {
         return c.json({ error: "property_needs_type_and_deal" }, 422);
       }
+      // Vehicles: every facet, from the catalogue's makes (or "Other"). A car is one
+      // unit, and the goods condition column mirrors its new/used state.
+      if (b.lane === "vehicles") {
+        const problem = vehicleProblem(b.attributes);
+        if (problem) return c.json({ error: problem }, 422);
+      }
       // A seller who won't share their location still gets placed, at the centre
       // of the area they chose. Without this they'd be tagged to an area but fall
       // out of every ring drawn around it, which reads as a bug.
@@ -363,8 +400,9 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
            condition, attributes, location, state, city, lat, lng)
         values (
           ${user.sub}, ${b.lane}, ${b.category}, ${b.title}, ${b.description ?? null},
-          ${b.priceKobo}, ${b.negotiable ?? true}, ${b.stock ?? 1},
-          ${b.condition ?? "used"}, ${db.json(b.attributes ?? {})},
+          ${b.priceKobo}, ${b.negotiable ?? true}, ${b.lane === "vehicles" ? 1 : (b.stock ?? 1)},
+          ${b.lane === "vehicles" ? (b.attributes?.vehicleCondition === "brand_new" ? "new" : "used") : (b.condition ?? "used")},
+          ${db.json(b.attributes ?? {})},
           ${b.location ?? null}, ${b.state ?? null}, ${b.city ?? null}, ${lat}, ${lng}
         )
         returning ${db.unsafe(SELECT)}
@@ -439,6 +477,19 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           maxPrice: z.coerce.number().int().nonnegative().optional(),
           location: z.string().max(120).optional(),
           ...LocationQuery,
+          // Vehicles (13e-filters-vehicles).
+          make: z.string().max(40).optional(),
+          model: z.string().max(40).optional(),
+          minYear: z.coerce.number().int().optional(),
+          maxYear: z.coerce.number().int().optional(),
+          maxMileageKm: z.coerce.number().int().nonnegative().optional(),
+          transmission: z.enum(TRANSMISSIONS).optional(),
+          fuel: z.enum(FUELS).optional(),
+          body: z.enum(BODIES).optional(),
+          vehicleCondition: z.enum(VEHICLE_CONDITIONS).optional(),
+          registration: z.enum(REGISTRATIONS).optional(),
+          /** relevance (default; newest when there's no query), price, newest, or lowest mileage. */
+          sort: z.enum(["relevance", "price_asc", "price_desc", "newest", "mileage_asc"]).optional(),
           limit: z.coerce.number().int().min(1).max(50).optional(),
           offset: z.coerce.number().int().min(0).optional(),
         }),
@@ -457,8 +508,11 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
     async (c) => {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
-      const { q, lane, category, condition, minPrice, maxPrice, location, ...rest } =
-        c.req.valid("query");
+      const {
+        q, lane, category, condition, minPrice, maxPrice, location,
+        make, model, minYear, maxYear: maxYr, maxMileageKm, transmission, fuel, body,
+        vehicleCondition, registration, sort, ...rest
+      } = c.req.valid("query");
       const limit = c.req.valid("query").limit ?? 20;
       const offset = c.req.valid("query").offset ?? 0;
       const place = locationWhere(db, rest);
@@ -472,16 +526,33 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (maxPrice != null) where = db`${where} and price_kobo <= ${maxPrice}`;
       if (location) where = db`${where} and location ilike ${"%" + location + "%"}`;
       if (place) where = db`${where} and (${place})`;
+      // Vehicle facets live in attributes; each filter narrows to cars that carry it.
+      if (make) where = db`${where} and attributes->>'make' = ${make}`;
+      if (model) where = db`${where} and lower(attributes->>'model') = lower(${model})`;
+      if (minYear != null) where = db`${where} and (attributes->>'year')::int >= ${minYear}`;
+      if (maxYr != null) where = db`${where} and (attributes->>'year')::int <= ${maxYr}`;
+      if (maxMileageKm != null) where = db`${where} and (attributes->>'mileageKm')::int <= ${maxMileageKm}`;
+      if (transmission) where = db`${where} and attributes->>'transmission' = ${transmission}`;
+      if (fuel) where = db`${where} and attributes->>'fuel' = ${fuel}`;
+      if (body) where = db`${where} and attributes->>'body' = ${body}`;
+      if (vehicleCondition) where = db`${where} and attributes->>'vehicleCondition' = ${vehicleCondition}`;
+      if (registration) where = db`${where} and attributes->>'registration' = ${registration}`;
       if (q)
         // FTS match OR a fuzzy word-similarity match on the title (typo tolerance;
         // word_similarity finds the best-matching word within the title, so a long
         // title still matches a single mistyped term).
         where = db`${where} and (search_vector @@ websearch_to_tsquery('english', ${q}) or word_similarity(${q}, title) > 0.25)`;
 
-      // Rank by FTS relevance, then fuzzy closeness; else newest first.
-      const order = q
-        ? db`order by ts_rank(search_vector, websearch_to_tsquery('english', ${q})) desc, word_similarity(${q}, title) desc, created_at desc`
-        : db`order by created_at desc`;
+      // Rank by FTS relevance, then fuzzy closeness; else newest first — unless the
+      // caller asked for an explicit sort (13e filter sheet).
+      const order =
+        sort === "price_asc" ? db`order by price_kobo asc, created_at desc`
+        : sort === "price_desc" ? db`order by price_kobo desc, created_at desc`
+        : sort === "newest" ? db`order by created_at desc`
+        : sort === "mileage_asc" ? db`order by (attributes->>'mileageKm')::int asc nulls last, created_at desc`
+        : q
+          ? db`order by ts_rank(search_vector, websearch_to_tsquery('english', ${q})) desc, word_similarity(${q}, title) desc, created_at desc`
+          : db`order by created_at desc`;
 
       const rows = await db<Row[]>`
         select ${db.unsafe(SELECT)} from public.listings
