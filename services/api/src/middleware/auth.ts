@@ -24,16 +24,16 @@ function getJwks() {
   return jwks;
 }
 
-export const auth = createMiddleware<AuthEnv>(async (c, next) => {
-  const header = c.req.header("Authorization");
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
-  if (!token) return c.json({ error: "unauthorized" }, 401);
-
+/**
+ * Verify a Supabase access token. Returns the caller, or null for any invalid token.
+ * Shared by the `auth` middleware and public routes that personalise when signed in.
+ */
+export async function verifyAccessToken(token: string): Promise<AuthUser | null> {
   let alg: string | undefined;
   try {
     alg = decodeProtectedHeader(token).alg;
   } catch {
-    return c.json({ error: "unauthorized" }, 401);
+    return null;
   }
 
   // Pin the audience (Supabase user tokens are aud="authenticated") and issuer
@@ -56,15 +56,22 @@ export const auth = createMiddleware<AuthEnv>(async (c, next) => {
       if (!keys) throw new Error("asymmetric token but SUPABASE_URL unset");
       ({ payload } = await jwtVerify(token, keys, verifyOpts));
     }
-
     const sub = payload.sub;
-    if (typeof sub !== "string") return c.json({ error: "unauthorized" }, 401);
-
-    c.set("user", { sub, phone: readPhone(payload) });
-    await next();
+    if (typeof sub !== "string") return null;
+    return { sub, phone: readPhone(payload) };
   } catch {
-    return c.json({ error: "unauthorized" }, 401);
+    return null;
   }
+}
+
+export const auth = createMiddleware<AuthEnv>(async (c, next) => {
+  const header = c.req.header("Authorization");
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return c.json({ error: "unauthorized" }, 401);
+  const user = await verifyAccessToken(token);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  c.set("user", user);
+  await next();
 });
 
 function readPhone(payload: JWTPayload): string | null {

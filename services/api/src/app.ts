@@ -8,6 +8,8 @@ import { registerDisputes } from "./routes/disputes.js";
 import { registerReviews } from "./routes/reviews.js";
 import { registerKyc } from "./routes/kyc.js";
 import { registerWebhooks } from "./routes/webhooks.js";
+import { registerProfiles } from "./routes/profiles.js";
+import { registerConversations } from "./routes/conversations.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -44,63 +46,11 @@ export function createApp() {
     (c) => c.json({ status: "ok" as const, ts: new Date().toISOString() }),
   );
 
-  // ── GET /me ─────────────────────────────────────────────────────────────────
-  const MeSchema = z
-    .object({
-      userId: z.string(),
-      phone: z.string().nullable(),
-      displayName: z.string().nullable(),
-      verificationLevel: z.number().int(),
-    })
-    .openapi("Me");
+  // ── Profiles, addresses, blocking, public seller profile (Phase 3 A) ──────
+  registerProfiles(app);
 
-  app.openapi(
-    createRoute({
-      method: "get",
-      path: "/me",
-      summary: "The authenticated user's profile",
-      tags: ["users"],
-      security: [{ bearerAuth: [] }],
-      middleware: [auth] as const,
-      responses: {
-        200: {
-          description: "Current user",
-          content: { "application/json": { schema: MeSchema } },
-        },
-        401: { description: "Missing or invalid token" },
-      },
-    }),
-    async (c) => {
-      const user = c.get("user");
-      const db = await getDb();
-      if (!db) {
-        return c.json({
-          userId: user.sub,
-          phone: user.phone,
-          displayName: null,
-          verificationLevel: 1,
-        });
-      }
-      // Upsert-on-first-sign-in, then read the profile (service-role write).
-      const rows = await db<
-        { display_name: string | null; phone: string | null; verification_level: number }[]
-      >`
-        insert into public.profiles (id, phone)
-        values (${user.sub}, ${user.phone})
-        on conflict (id) do update
-          set updated_at = now(),
-              phone = coalesce(public.profiles.phone, ${user.phone})
-        returning display_name, phone, verification_level
-      `;
-      const p = rows[0]!;
-      return c.json({
-        userId: user.sub,
-        phone: p.phone,
-        displayName: p.display_name,
-        verificationLevel: p.verification_level,
-      });
-    },
-  );
+  // ── Conversations + inbox (Phase 3 A) ─────────────────────────────────────
+  registerConversations(app);
 
   // ── POST /auth/otp/request ──────────────────────────────────────────────────
   // Throttled OTP request. Rate-limiting lives HERE (per-phone + per-IP) so a bare

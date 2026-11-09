@@ -2,6 +2,7 @@ import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { auth, type AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import { createOffer, transition, type DealRow } from "../deals/commands.js";
+import { isBlockedEitherWay } from "../profiles/summary.js";
 
 /**
  * M3 — offers/deals + chat. Buyers open offers on listings; both parties drive the
@@ -114,6 +115,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         201: { description: "Deal opened", content: { "application/json": { schema: DealSchema } } },
         400: { description: "Cannot offer on own listing", content: { "application/json": { schema: ErrorSchema } } },
         401: { description: "Unauthorized" },
+        403: { description: "Blocked", content: { "application/json": { schema: ErrorSchema } } },
         409: { description: "Listing unavailable", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
@@ -124,6 +126,9 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const { id } = c.req.valid("param");
       const b = c.req.valid("json");
+      const [owner] = await db<{ seller_id: string }[]>`select seller_id from public.listings where id = ${id}`;
+      if (owner && (await isBlockedEitherWay(db, user.sub, owner.seller_id)))
+        return c.json({ error: "blocked" }, 403);
       const r = await createOffer(db, {
         listingId: id,
         buyerId: user.sub,
@@ -454,15 +459,20 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       if (!deal || (deal.buyer_id !== user.sub && deal.seller_id !== user.sub))
         return c.json({ error: "not_found" }, 404);
       const rows = await db<
-        { id: number; deal_id: string; sender_id: string; body: string; created_at: string | Date }[]
+        { id: number; deal_id: string | null; sender_id: string; body: string; created_at: string | Date }[]
       >`
-        select id, deal_id, sender_id, body, created_at
-        from public.messages where deal_id = ${id} order by created_at
+        -- The deal's whole conversation, including chat from before the offer.
+        select m.id, m.deal_id, m.sender_id, m.body, m.created_at
+        from public.messages m
+        join public.conversations cv on cv.id = m.conversation_id
+        join public.deals d on d.listing_id = cv.listing_id and d.buyer_id = cv.buyer_id
+        where d.id = ${id} order by m.created_at, m.id
       `;
       return c.json(
         rows.map((m) => ({
           id: m.id,
-          dealId: m.deal_id,
+          // Pre-offer messages carry no deal; report them under this deal's thread.
+          dealId: m.deal_id ?? id,
           senderId: m.sender_id,
           body: m.body,
           createdAt: iso(m.created_at),
@@ -488,6 +498,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       responses: {
         201: { description: "Sent", content: { "application/json": { schema: MessageSchema } } },
         401: { description: "Unauthorized" },
+        403: { description: "Blocked", content: { "application/json": { schema: ErrorSchema } } },
         404: { description: "Not found" },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
@@ -503,6 +514,8 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       `;
       if (!deal || (deal.buyer_id !== user.sub && deal.seller_id !== user.sub))
         return c.json({ error: "not_found" }, 404);
+      if (await isBlockedEitherWay(db, deal.buyer_id, deal.seller_id)) return c.json({ error: "blocked" }, 403);
+      // The messages_link trigger files it under the deal's conversation.
       const [m] = await db<
         { id: number; deal_id: string; sender_id: string; body: string; created_at: string | Date }[]
       >`

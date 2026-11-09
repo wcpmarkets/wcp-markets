@@ -8,6 +8,8 @@ import {
   createSignedDownloadUrl,
   createSignedUploadUrl,
 } from "../supabase.js";
+import type { Sql } from "../deals/commands.js";
+import { UserSummarySchema, userSummaries, type UserSummary } from "../profiles/summary.js";
 
 /**
  * M1 — Goods listings + Storage. CRUD through the service-role API (business
@@ -46,6 +48,8 @@ const ListingSchema = z
   .object({
     id: z.string().uuid(),
     sellerId: z.string().uuid(),
+    /** The seller's public face (name, store, photo, verified) — never their phone. */
+    seller: UserSummarySchema,
     lane: z.enum(LANES),
     category: z.string(),
     title: z.string(),
@@ -190,7 +194,7 @@ const iso = (v: string | Date): string =>
   typeof v === "string" ? v : v.toISOString();
 
 /** Map a row to the API shape, signing a download URL for each stored image. */
-async function toListing(r: Row): Promise<z.infer<typeof ListingSchema>> {
+async function toListing(r: Row, seller: UserSummary): Promise<z.infer<typeof ListingSchema>> {
   const imageUrls = (
     await Promise.all(
       (r.image_paths ?? []).map((p) =>
@@ -202,6 +206,7 @@ async function toListing(r: Row): Promise<z.infer<typeof ListingSchema>> {
   return {
     id: r.id,
     sellerId: r.seller_id,
+    seller,
     lane: r.lane as (typeof LANES)[number],
     category: r.category,
     title: r.title,
@@ -220,6 +225,12 @@ async function toListing(r: Row): Promise<z.infer<typeof ListingSchema>> {
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
+}
+
+/** Map rows to the API shape, batch-loading each distinct seller's summary once. */
+async function toListings(db: Sql, rows: Row[]): Promise<z.infer<typeof ListingSchema>[]> {
+  const sellers = await userSummaries(db, rows.map((r) => r.seller_id));
+  return Promise.all(rows.map((r) => toListing(r, sellers.get(r.seller_id)!)));
 }
 
 const SELECT = `id, seller_id, lane, category, title, description, price_kobo,
@@ -350,7 +361,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         )
         returning ${db.unsafe(SELECT)}
       `;
-      return c.json(await toListing(rows[0]!), 201);
+      return c.json((await toListings(db, [rows[0]!]))[0]!, 201);
     },
   );
 
@@ -396,7 +407,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         order by created_at desc
         limit ${take}
       `;
-      const items = await Promise.all(rows.map(toListing));
+      const items = await toListings(db, rows);
       const nextCursor =
         rows.length === take ? iso(rows[rows.length - 1]!.created_at) : null;
       return c.json({ items, nextCursor }, 200);
@@ -470,7 +481,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         ${order}
         limit ${limit} offset ${offset}
       `;
-      const items = await Promise.all(rows.map(toListing));
+      const items = await toListings(db, rows);
       const nextOffset = rows.length === limit ? offset + limit : null;
       return c.json({ items, nextOffset }, 200);
     },
@@ -565,7 +576,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         where seller_id = ${user.sub}
         order by created_at desc
       `;
-      return c.json(await Promise.all(rows.map(toListing)), 200);
+      return c.json(await toListings(db, rows), 200);
     },
   );
 
@@ -598,7 +609,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         where id = ${id} and status = 'active'
       `;
       if (!rows[0]) return c.json({ error: "not_found" }, 404);
-      return c.json(await toListing(rows[0]), 200);
+      return c.json((await toListings(db, [rows[0]]))[0]!, 200);
     },
   );
 
@@ -672,7 +683,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           where id = ${id} and seller_id = ${user.sub}
         `;
         if (!rows[0]) return c.json({ error: "not_found" }, 404);
-        return c.json(await toListing(rows[0]), 200);
+        return c.json((await toListings(db, [rows[0]]))[0]!, 200);
       }
 
       const rows = await db<Row[]>`
@@ -681,7 +692,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         returning ${db.unsafe(SELECT)}
       `;
       if (!rows[0]) return c.json({ error: "not_found" }, 404);
-      return c.json(await toListing(rows[0]), 200);
+      return c.json((await toListings(db, [rows[0]]))[0]!, 200);
     },
   );
 
