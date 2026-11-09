@@ -163,7 +163,7 @@ async function main() {
     check("outsider cancel → 404", (await api(`/viewings/${v1.id}/cancel`, other.token, { method: "POST" })).status === 404);
     const after = await j<{ viewing: Viewing | null }>(await api(`/conversations/${conv.id}`, buyer.token));
     check("no live viewing after cancel", after.viewing === null);
-    await api(`/users/${dealer.id}/block`, buyer.token, { method: "POST" });
+    await api(`/users/${dealer.id}/block`, buyer.token, { method: "PUT" });
     const blocked = await propose(dealer.token, { startsAt: at(24), place: "Lot" });
     check("blocked → 403", blocked.status === 403, `${blocked.status}`);
     let dbErr = "";
