@@ -19,7 +19,15 @@ import { UserSummarySchema, userSummaries, type UserSummary } from "../profiles/
  */
 
 const CONDITIONS = ["new", "used", "refurbished"] as const;
-const STATUSES = ["draft", "active", "sold", "archived"] as const;
+/** Statuses a seller may set. */
+const SELLER_STATUSES = ["draft", "active", "sold", "archived"] as const;
+/**
+ * Every status a listing can be in. under_review (paused by reports) and removed
+ * (taken down by staff) are set only by moderation — migration 0023's trigger
+ * enforces it — and, like drafts, are never publicly readable.
+ */
+const STATUSES = [...SELLER_STATUSES, "under_review", "removed"] as const;
+const MODERATED: readonly string[] = ["under_review", "removed"];
 const LANES = ["goods", "property"] as const;
 const PROPERTY_TYPES = ["apartment", "house", "land", "commercial", "shop", "office"] as const;
 const DEAL_TYPES = ["rent", "sale"] as const;
@@ -108,7 +116,7 @@ const ListingUpdateSchema = z
     location: z.string().max(120).nullable().optional(),
     state: z.string().max(64).optional(),
     city: z.string().max(64).optional(),
-    status: z.enum(STATUSES).optional(),
+    status: z.enum(SELLER_STATUSES).optional(),
   })
   .openapi("ListingUpdate");
 
@@ -633,6 +641,10 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         },
         401: { description: "Unauthorized" },
         404: { description: "Not found or not owner" },
+        409: {
+          description: "Listing is under moderation; its status can't be changed",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
         422: {
           description: "Location is not a known state/area",
           content: { "application/json": { schema: ErrorSchema } },
@@ -660,7 +672,18 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (b.stock !== undefined) cols.stock = b.stock;
       if (b.condition !== undefined) cols.condition = b.condition;
       if (b.location !== undefined) cols.location = b.location;
-      if (b.status !== undefined) cols.status = b.status;
+      if (b.status !== undefined) {
+        // A listing in moderation keeps its status until staff decide; the seller can
+        // still edit its details. (The DB trigger holds the same line.)
+        const [cur] = await db<{ status: string }[]>`
+          select status from public.listings where id = ${id} and seller_id = ${user.sub}
+        `;
+        if (!cur) return c.json({ error: "not_found" }, 404);
+        if (MODERATED.includes(cur.status) && b.status !== cur.status) {
+          return c.json({ error: "listing_under_moderation" }, 409);
+        }
+        if (b.status !== cur.status) cols.status = b.status;
+      }
       // Moving a listing means moving both halves of the pair, and only to a
       // canonical area — the create path holds the same line.
       if (b.state !== undefined || b.city !== undefined) {

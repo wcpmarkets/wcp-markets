@@ -459,7 +459,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       if (!deal || (deal.buyer_id !== user.sub && deal.seller_id !== user.sub))
         return c.json({ error: "not_found" }, 404);
       const rows = await db<
-        { id: number; deal_id: string | null; sender_id: string; body: string; created_at: string | Date }[]
+        { id: number | string; deal_id: string | null; sender_id: string; body: string; created_at: string | Date }[]
       >`
         -- The deal's whole conversation, including chat from before the offer.
         select m.id, m.deal_id, m.sender_id, m.body, m.created_at
@@ -470,7 +470,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       `;
       return c.json(
         rows.map((m) => ({
-          id: m.id,
+          id: Number(m.id), // bigint arrives as a string
           // Pre-offer messages carry no deal; report them under this deal's thread.
           dealId: m.deal_id ?? id,
           senderId: m.sender_id,
@@ -517,14 +517,14 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       if (await isBlockedEitherWay(db, deal.buyer_id, deal.seller_id)) return c.json({ error: "blocked" }, 403);
       // The messages_link trigger files it under the deal's conversation.
       const [m] = await db<
-        { id: number; deal_id: string; sender_id: string; body: string; created_at: string | Date }[]
+        { id: number | string; deal_id: string; sender_id: string; body: string; created_at: string | Date }[]
       >`
         insert into public.messages (deal_id, sender_id, body)
         values (${id}, ${user.sub}, ${body})
         returning id, deal_id, sender_id, body, created_at
       `;
       return c.json(
-        { id: m!.id, dealId: m!.deal_id, senderId: m!.sender_id, body: m!.body, createdAt: iso(m!.created_at) },
+        { id: Number(m!.id), dealId: m!.deal_id, senderId: m!.sender_id, body: m!.body, createdAt: iso(m!.created_at) },
         201,
       );
     },

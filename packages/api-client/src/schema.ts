@@ -1056,6 +1056,256 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report a listing, a person, or a message */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ReportCreate"];
+                };
+            };
+            responses: {
+                /** @description Already reported (open) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportReceipt"];
+                    };
+                };
+                /** @description Report filed */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportReceipt"];
+                    };
+                };
+                /** @description Invalid target */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not a party to that message */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Target not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Open report queue, oldest first (staff only) */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    targetType?: "listing" | "user" | "message";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Open reports */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportQueueItem"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not staff */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/reports/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve a report and every other open report on the same target (staff only) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ReportResolve"];
+                };
+            };
+            responses: {
+                /** @description Resolved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportResolution"];
+                    };
+                };
+                /** @description Action doesn't fit the target */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not staff, or staff involved in the report */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such open report */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/otp/request": {
         parameters: {
             query?: never;
@@ -1472,6 +1722,15 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Listing is under moderation; its status can't be changed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
                 /** @description Location is not a known state/area */
                 422: {
@@ -3233,6 +3492,65 @@ export interface components {
         ConversationMessageCreate: {
             body: string;
         };
+        ReportReceipt: {
+            /** Format: uuid */
+            id: string;
+            duplicate: boolean;
+            listingPaused: boolean;
+            blocked: boolean;
+        };
+        ReportCreate: {
+            /** @enum {string} */
+            targetType: "listing" | "user" | "message";
+            /** Format: uuid */
+            listingId?: string;
+            /** Format: uuid */
+            userId?: string;
+            messageId?: number;
+            /** @enum {string} */
+            reason: "scam" | "counterfeit" | "prohibited" | "misleading" | "offensive" | "harassment" | "other";
+            details?: string;
+            block?: boolean;
+        };
+        ReportedListing: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            status: string;
+        } | null;
+        ReportedMessage: {
+            id: number;
+            body: string;
+            /** Format: uuid */
+            conversationId: string;
+        } | null;
+        ReportQueueItem: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            targetType: "listing" | "user" | "message";
+            /** @enum {string} */
+            reason: "scam" | "counterfeit" | "prohibited" | "misleading" | "offensive" | "harassment" | "other";
+            details: string | null;
+            /** Format: uuid */
+            reporterId: string;
+            reportedUser: components["schemas"]["UserSummary"];
+            listing: components["schemas"]["ReportedListing"];
+            message: components["schemas"]["ReportedMessage"];
+            pausedListing: boolean;
+            openReportsOnTarget: number;
+            reportsAgainstUser30d: number;
+            createdAt: string;
+        };
+        ReportResolution: {
+            resolved: number;
+            listingStatus: string | null;
+        };
+        ReportResolve: {
+            /** @enum {string} */
+            action: "dismiss" | "remove_listing" | "uphold";
+            note?: string;
+        };
         OtpRequested: {
             /** @enum {string} */
             status: "sent";
@@ -3271,7 +3589,7 @@ export interface components {
             state: string | null;
             city: string | null;
             /** @enum {string} */
-            status: "draft" | "active" | "sold" | "archived";
+            status: "draft" | "active" | "sold" | "archived" | "under_review" | "removed";
             imageUrls: string[];
             createdAt: string;
             updatedAt: string;

@@ -163,9 +163,11 @@ async function loadConversation(db: Sql, me: string, id: string): Promise<ConvRo
   return row ?? null;
 }
 
-type MsgRow = { id: number; conversation_id: string; deal_id: string | null; sender_id: string; body: string; created_at: string | Date };
+// messages.id is bigint, which postgres.js returns as a string — Number() it at the
+// boundary so the wire matches the contract's integer.
+type MsgRow = { id: number | string; conversation_id: string; deal_id: string | null; sender_id: string; body: string; created_at: string | Date };
 const toMessage = (m: MsgRow) => ({
-  id: m.id,
+  id: Number(m.id),
   conversationId: m.conversation_id,
   dealId: m.deal_id,
   senderId: m.sender_id,

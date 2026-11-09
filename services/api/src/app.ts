@@ -10,6 +10,7 @@ import { registerKyc } from "./routes/kyc.js";
 import { registerWebhooks } from "./routes/webhooks.js";
 import { registerProfiles } from "./routes/profiles.js";
 import { registerConversations } from "./routes/conversations.js";
+import { registerReports } from "./routes/reports.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -51,6 +52,7 @@ export function createApp() {
 
   // ── Conversations + inbox (Phase 3 A) ─────────────────────────────────────
   registerConversations(app);
+  registerReports(app);
 
   // ── POST /auth/otp/request ──────────────────────────────────────────────────
   // Throttled OTP request. Rate-limiting lives HERE (per-phone + per-IP) so a bare

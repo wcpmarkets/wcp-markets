@@ -756,6 +756,236 @@
           "body"
         ]
       },
+      "ReportReceipt": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "listingPaused": {
+            "type": "boolean"
+          },
+          "blocked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "duplicate",
+          "listingPaused",
+          "blocked"
+        ]
+      },
+      "ReportCreate": {
+        "type": "object",
+        "properties": {
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "listing",
+              "user",
+              "message"
+            ]
+          },
+          "listingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "messageId": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "scam",
+              "counterfeit",
+              "prohibited",
+              "misleading",
+              "offensive",
+              "harassment",
+              "other"
+            ]
+          },
+          "details": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "block": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "targetType",
+          "reason"
+        ]
+      },
+      "ReportedListing": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status"
+        ]
+      },
+      "ReportedMessage": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "body": {
+            "type": "string"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "body",
+          "conversationId"
+        ]
+      },
+      "ReportQueueItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "listing",
+              "user",
+              "message"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "scam",
+              "counterfeit",
+              "prohibited",
+              "misleading",
+              "offensive",
+              "harassment",
+              "other"
+            ]
+          },
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reporterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reportedUser": {
+            "$ref": "#/components/schemas/UserSummary"
+          },
+          "listing": {
+            "$ref": "#/components/schemas/ReportedListing"
+          },
+          "message": {
+            "$ref": "#/components/schemas/ReportedMessage"
+          },
+          "pausedListing": {
+            "type": "boolean"
+          },
+          "openReportsOnTarget": {
+            "type": "integer"
+          },
+          "reportsAgainstUser30d": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "targetType",
+          "reason",
+          "details",
+          "reporterId",
+          "reportedUser",
+          "listing",
+          "message",
+          "pausedListing",
+          "openReportsOnTarget",
+          "reportsAgainstUser30d",
+          "createdAt"
+        ]
+      },
+      "ReportResolution": {
+        "type": "object",
+        "properties": {
+          "resolved": {
+            "type": "integer"
+          },
+          "listingStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "resolved",
+          "listingStatus"
+        ]
+      },
+      "ReportResolve": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "dismiss",
+              "remove_listing",
+              "uphold"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
       "OtpRequested": {
         "type": "object",
         "properties": {
@@ -900,7 +1130,9 @@
               "draft",
               "active",
               "sold",
-              "archived"
+              "archived",
+              "under_review",
+              "removed"
             ]
           },
           "imageUrls": {
@@ -2917,6 +3149,267 @@
         }
       }
     },
+    "/reports": {
+      "post": {
+        "summary": "Report a listing, a person, or a message",
+        "tags": [
+          "moderation"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Already reported (open)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportReceipt"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Report filed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not a party to that message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Target not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/reports": {
+      "get": {
+        "summary": "Open report queue, oldest first (staff only)",
+        "tags": [
+          "moderation"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "listing",
+                "user",
+                "message"
+              ]
+            },
+            "required": false,
+            "name": "targetType",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Open reports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReportQueueItem"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not staff",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/reports/{id}/resolve": {
+      "post": {
+        "summary": "Resolve a report and every other open report on the same target (staff only)",
+        "tags": [
+          "moderation"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportResolve"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResolution"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Action doesn't fit the target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not staff, or staff involved in the report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such open report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/otp/request": {
       "post": {
         "summary": "Request a phone OTP (rate-limited)",
@@ -3492,6 +3985,16 @@
           },
           "404": {
             "description": "Not found or not owner"
+          },
+          "409": {
+            "description": "Listing is under moderation; its status can't be changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "422": {
             "description": "Location is not a known state/area",
