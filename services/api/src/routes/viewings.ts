@@ -89,6 +89,15 @@ async function partyConversation(db: Sql, me: string, id: string): Promise<Party
   return conv ?? null;
 }
 
+/**
+ * A viewing change is thread activity: it lifts the conversation in both inboxes, the
+ * way a message does — otherwise a seller never sees an enquiry whose buyer went
+ * straight to proposing a time (the inbox lists threads with activity only).
+ */
+async function touch(db: Sql, conversationId: string) {
+  await db`update public.conversations set last_message_at = now() where id = ${conversationId}`;
+}
+
 const common = {
   401: { description: "Unauthorized" },
   404: { description: "Not found" },
@@ -184,6 +193,7 @@ export function registerViewings(app: OpenAPIHono<AuthEnv>) {
           values (${id}, ${user.sub}, ${starts}, ${ends}, ${b.place}, ${b.note ?? null})
           returning ${t.unsafe(COLS)}
         `;
+        await touch(t, id);
         return v!;
       });
       return c.json(toViewing(row), 201);
@@ -227,6 +237,7 @@ export function registerViewings(app: OpenAPIHono<AuthEnv>) {
         returning ${db.unsafe(COLS)}
       `;
       if (!row) return c.json({ error: "not_proposed" }, 409);
+      await touch(db, row.conversation_id);
       return c.json(toViewing(row), 200);
     },
   );
@@ -259,7 +270,10 @@ export function registerViewings(app: OpenAPIHono<AuthEnv>) {
           and v.status in ('proposed', 'confirmed')
         returning ${db.unsafe(COLS.split(",").map((x) => "v." + x.trim()).join(", "))}
       `;
-      if (row) return c.json(toViewing(row), 200);
+      if (row) {
+        await touch(db, row.conversation_id);
+        return c.json(toViewing(row), 200);
+      }
       const [exists] = await db`
         select 1 from public.viewings v join public.conversations c on c.id = v.conversation_id
         where v.id = ${id} and ${user.sub} in (c.buyer_id, c.seller_id)

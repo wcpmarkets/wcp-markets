@@ -144,6 +144,8 @@ async function main() {
     const v1r = await propose(buyer.token, { startsAt: at(24), endsAt: at(26), place: "Dealer lot, 12 Herbert Macaulay Way", note: "Bringing my mechanic" });
     const v1 = await j<Viewing>(v1r);
     check("buyer proposes → 201 proposed", v1r.status === 201 && v1.status === "proposed", `${v1r.status}`);
+    const dealerInbox = await j<{ items: { id: string }[] }>(await api("/conversations", dealer.token));
+    check("a viewing alone lifts the thread into the dealer's inbox", dealerInbox.items.some((i) => i.id === conv.id));
     check("proposer can't confirm their own", (await api(`/viewings/${v1.id}/confirm`, buyer.token, { method: "POST" })).status === 403);
     const v2r = await propose(dealer.token, { startsAt: at(48), place: "Dealer lot" });
     const v2 = await j<Viewing>(v2r);
