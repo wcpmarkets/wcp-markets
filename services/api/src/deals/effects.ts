@@ -114,11 +114,17 @@ export const EFFECTS: Partial<Record<DealAction, Effect>> = {
       providerRef: providerRef ?? `hold:${deal.id}`,
     });
 
+    // A service is a provider's time, not a unit on a shelf: a booked job never
+    // sells out the listing, so only goods-style lanes decrement stock.
     const dec = await sql`
       update public.listings set stock = stock - ${deal.qty}
-      where id = ${deal.listing_id} and stock >= ${deal.qty}
+      where id = ${deal.listing_id} and stock >= ${deal.qty} and lane <> 'services'
       returning id
     `;
+    const [svc] = dec.length === 0
+      ? await sql`select 1 from public.listings where id = ${deal.listing_id} and lane = 'services'`
+      : [];
+    if (svc) return;
     if (dec.length === 0) {
       await sql`
         insert into public.outbox (topic, payload, deal_id, event_seq)

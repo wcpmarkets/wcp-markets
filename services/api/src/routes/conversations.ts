@@ -6,6 +6,7 @@ import type { Sql } from "../deals/commands.js";
 import { LISTING_IMAGES_BUCKET, createSignedDownloadUrl } from "../supabase.js";
 import { UserSummarySchema, isBlockedEitherWay, userSummaries } from "../profiles/summary.js";
 import { ViewingSchema, toViewing, type ViewingRow } from "./viewings.js";
+import { QuoteRequestSchema, conversationRequests } from "./services.js";
 
 /**
  * Phase 3 A — conversations: one thread per (listing, buyer), opened from a listing's
@@ -57,6 +58,8 @@ const ConversationSchema = z
      *  Optional rather than nullable: .nullable() on a registered schema makes the
      *  component itself nullable, and every other use becomes an allOf wrapper. */
     viewing: ViewingSchema.optional(),
+    /** Services: the buyer's open brief in this thread (22c-quotecard "Your request"). */
+    quoteRequest: QuoteRequestSchema.optional(),
     createdAt: z.string(),
   })
   .openapi("Conversation");
@@ -136,6 +139,10 @@ async function toConversations(db: Sql, me: string, rows: ConvRow[]) {
     db,
     rows.map((r) => (r.buyer_id === me ? r.seller_id : r.buyer_id)),
   );
+  const requests = await conversationRequests(
+    db,
+    rows.filter((r) => r.lane === "services").map((r) => r.id),
+  );
   return Promise.all(
     rows.map(async (r) => {
       const other = r.buyer_id === me ? r.seller_id : r.buyer_id;
@@ -159,6 +166,7 @@ async function toConversations(db: Sql, me: string, rows: ConvRow[]) {
         deal: r.deal_id && r.deal_state ? { id: r.deal_id, state: r.deal_state } : null,
         blocked: r.blocked,
         viewing: r.viewing ? toViewing(r.viewing) : undefined,
+        quoteRequest: requests.get(r.id),
         createdAt: iso(r.created_at),
       };
     }),

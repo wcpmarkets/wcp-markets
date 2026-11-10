@@ -57,6 +57,7 @@ export type Actor = (typeof ACTORS)[number];
 
 export const DEAL_ACTIONS = [
   "offer", // genesis only (creates the deal in OFFERED) — not in the table
+  "quote", // genesis only: a service provider quotes first (→ COUNTERED_BY_SELLER)
   "counter",
   "accept",
   "decline",

@@ -1679,6 +1679,299 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/services/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Service groups and types, coverage rings and availability flags (13i) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Catalogue */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ServiceCatalog"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/listings/{id}/quote-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request a quote from a service provider; replaces the thread's open request */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["QuoteRequestCreate"];
+                };
+            };
+            responses: {
+                /** @description Sent */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteRequest"];
+                    };
+                };
+                /** @description Own listing */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Blocked */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not a live services listing, or a quote is live in this thread (quote_live) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unknown area */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/quote-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Quote requests sent to me as a provider, newest first, with New/Quoted/Scheduled counts */
+        get: {
+            parameters: {
+                query?: {
+                    stage?: "new" | "quoted" | "scheduled" | "done";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Requests */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteRequestPage"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/quote-requests/{id}/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Answer a quote request with a price (opens a deal awaiting the buyer) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["QuoteCreate"];
+                };
+            };
+            responses: {
+                /** @description Quoted */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteRequest"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Blocked */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Request closed, listing unavailable, or a quote is already live (counter it instead) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Start date in the past */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/otp/request": {
         parameters: {
             query?: never;
@@ -1762,7 +2055,7 @@ export interface paths {
                     nearLat?: number | null;
                     nearLng?: number | null;
                     radiusKm?: number;
-                    lane?: "goods" | "property" | "vehicles";
+                    lane?: "goods" | "property" | "vehicles" | "services";
                     limit?: number;
                     cursor?: string;
                 };
@@ -1861,7 +2154,7 @@ export interface paths {
             parameters: {
                 query?: {
                     q?: string;
-                    lane?: "goods" | "property" | "vehicles";
+                    lane?: "goods" | "property" | "vehicles" | "services";
                     category?: string;
                     condition?: "new" | "used" | "refurbished";
                     minPrice?: number | null;
@@ -1882,6 +2175,8 @@ export interface paths {
                     body?: "saloon" | "suv" | "hatchback" | "bus" | "pickup" | "coupe" | "minivan" | "truck";
                     vehicleCondition?: "brand_new" | "foreign_used" | "nigerian_used";
                     registration?: "registered" | "unregistered" | "custom_papers";
+                    serviceType?: string;
+                    availability?: "today" | "this_week" | "emergency";
                     sort?: "relevance" | "price_asc" | "price_desc" | "newest" | "mileage_asc";
                     limit?: number;
                     offset?: number | null;
@@ -2271,7 +2566,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Listing unavailable */
+                /** @description Listing unavailable, lead-gen lane, or a services listing (the provider quotes first) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -3862,6 +4157,33 @@ export interface components {
             cancelledBy: string | null;
             createdAt: string;
         };
+        QuoteRequest: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            conversationId: string;
+            /** Format: uuid */
+            listingId: string;
+            listingTitle: string;
+            buyer: components["schemas"]["UserSummary"];
+            seller: components["schemas"]["UserSummary"];
+            service: string;
+            description: string;
+            location: string | null;
+            state: string | null;
+            city: string | null;
+            preferred: string | null;
+            /** @enum {string} */
+            status: "open" | "closed";
+            /** @enum {string} */
+            stage: "new" | "quoted" | "scheduled" | "done";
+            /** Format: uuid */
+            dealId: string | null;
+            dealState: string | null;
+            quotedKobo: number | null;
+            startsAt: string | null;
+            createdAt: string;
+        };
         Conversation: {
             /** Format: uuid */
             id: string;
@@ -3874,6 +4196,7 @@ export interface components {
             deal: components["schemas"]["ConversationDeal"];
             blocked: boolean;
             viewing?: components["schemas"]["Viewing"];
+            quoteRequest?: components["schemas"]["QuoteRequest"];
             createdAt: string;
         };
         ConversationPage: {
@@ -3991,12 +4314,49 @@ export interface components {
             place: string;
             note?: string;
         };
+        ServiceGroup: {
+            group: string;
+            types: string[];
+        };
+        ServiceCatalog: {
+            groups: components["schemas"]["ServiceGroup"][];
+            availability: ("today" | "this_week" | "emergency")[];
+            coverageKm: number[];
+        };
+        QuoteRequestCreate: {
+            service: string;
+            description: string;
+            state?: string;
+            city?: string;
+            location?: string;
+            preferred?: string;
+        };
+        QuoteRequestCounts: {
+            all: number;
+            new: number;
+            quoted: number;
+            scheduled: number;
+        };
+        QuoteRequestPage: {
+            items: components["schemas"]["QuoteRequest"][];
+            counts: components["schemas"]["QuoteRequestCounts"];
+        };
+        QuoteCreate: {
+            priceKobo: number;
+            scope?: string;
+            /** Format: date-time */
+            startsAt?: string;
+        };
         OtpRequested: {
             /** @enum {string} */
             status: "sent";
         };
         OtpRequest: {
             phone: string;
+        };
+        RateItem: {
+            name: string;
+            fromKobo?: number;
         };
         ListingAttributes: {
             /** @enum {string} */
@@ -4019,6 +4379,11 @@ export interface components {
             vehicleCondition?: "brand_new" | "foreign_used" | "nigerian_used";
             /** @enum {string} */
             registration?: "registered" | "unregistered" | "custom_papers";
+            serviceType?: string;
+            rateCard?: components["schemas"]["RateItem"][];
+            coverageKm?: number;
+            coverageAnywhere?: boolean;
+            availability?: ("today" | "this_week" | "emergency")[];
         };
         Listing: {
             /** Format: uuid */
@@ -4027,7 +4392,7 @@ export interface components {
             sellerId: string;
             seller: components["schemas"]["UserSummary"];
             /** @enum {string} */
-            lane: "goods" | "property" | "vehicles";
+            lane: "goods" | "property" | "vehicles" | "services";
             category: string;
             title: string;
             description: string | null;
@@ -4053,7 +4418,7 @@ export interface components {
              * @default goods
              * @enum {string}
              */
-            lane: "goods" | "property" | "vehicles";
+            lane: "goods" | "property" | "vehicles" | "services";
             category: string;
             title: string;
             description?: string;
@@ -4117,6 +4482,11 @@ export interface components {
             /** @enum {string} */
             contentType: "image/jpeg" | "image/png" | "image/webp";
         };
+        DealTerms: {
+            service: string;
+            scope?: string | null;
+            startsAt?: string | null;
+        };
         Deal: {
             /** Format: uuid */
             id: string;
@@ -4133,6 +4503,7 @@ export interface components {
             stateToken: string;
             priceKobo: number;
             qty: number;
+            terms?: components["schemas"]["DealTerms"];
             createdAt: string;
             updatedAt: string;
         };

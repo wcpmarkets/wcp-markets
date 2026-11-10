@@ -13,6 +13,15 @@ import { isBlockedEitherWay } from "../profiles/summary.js";
 
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 
+/** A service quote's terms (22c-quotecard: Service · Scope · When). Absent on goods deals. */
+export const DealTermsSchema = z
+  .object({
+    service: z.string(),
+    scope: z.string().nullable().optional(),
+    startsAt: z.string().nullable().optional(),
+  })
+  .openapi("DealTerms");
+
 const DealSchema = z
   .object({
     id: z.string().uuid(),
@@ -24,6 +33,7 @@ const DealSchema = z
     stateToken: z.string().uuid(),
     priceKobo: z.number().int().nonnegative(),
     qty: z.number().int().positive(),
+    terms: DealTermsSchema.optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -89,6 +99,7 @@ function toDeal(d: DealRow, uid: string): z.infer<typeof DealSchema> {
     stateToken: d.state_token,
     priceKobo: Number(d.price_kobo),
     qty: d.qty,
+    terms: d.terms ?? undefined,
     createdAt: iso(d.created_at),
     updatedAt: iso(d.updated_at),
   };
@@ -116,7 +127,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         400: { description: "Cannot offer on own listing", content: { "application/json": { schema: ErrorSchema } } },
         401: { description: "Unauthorized" },
         403: { description: "Blocked", content: { "application/json": { schema: ErrorSchema } } },
-        409: { description: "Listing unavailable", content: { "application/json": { schema: ErrorSchema } } },
+        409: { description: "Listing unavailable, lead-gen lane, or a services listing (the provider quotes first)", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -139,6 +150,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       if (!r.ok) {
         if (r.code === "own_listing") return c.json({ error: "cannot_offer_own_listing" }, 400);
         if (r.code === "lead_gen_lane") return c.json({ error: "lead_gen_lane" }, 409);
+        if (r.code === "quote_first") return c.json({ error: "quote_first" }, 409);
         return c.json({ error: "listing_unavailable" }, 409);
       }
       return c.json(toDeal(r.deal, user.sub), 201);

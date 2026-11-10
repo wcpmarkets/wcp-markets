@@ -704,6 +704,127 @@
           "createdAt"
         ]
       },
+      "QuoteRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "listingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "listingTitle": {
+            "type": "string"
+          },
+          "buyer": {
+            "$ref": "#/components/schemas/UserSummary"
+          },
+          "seller": {
+            "$ref": "#/components/schemas/UserSummary"
+          },
+          "service": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "preferred": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "new",
+              "quoted",
+              "scheduled",
+              "done"
+            ]
+          },
+          "dealId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "dealState": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quotedKobo": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "startsAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversationId",
+          "listingId",
+          "listingTitle",
+          "buyer",
+          "seller",
+          "service",
+          "description",
+          "location",
+          "state",
+          "city",
+          "preferred",
+          "status",
+          "stage",
+          "dealId",
+          "dealState",
+          "quotedKobo",
+          "startsAt",
+          "createdAt"
+        ]
+      },
       "Conversation": {
         "type": "object",
         "properties": {
@@ -739,6 +860,9 @@
           },
           "viewing": {
             "$ref": "#/components/schemas/Viewing"
+          },
+          "quoteRequest": {
+            "$ref": "#/components/schemas/QuoteRequest"
           },
           "createdAt": {
             "type": "string"
@@ -1273,6 +1397,153 @@
           "place"
         ]
       },
+      "ServiceGroup": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "group",
+          "types"
+        ]
+      },
+      "ServiceCatalog": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceGroup"
+            }
+          },
+          "availability": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "today",
+                "this_week",
+                "emergency"
+              ]
+            }
+          },
+          "coverageKm": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "required": [
+          "groups",
+          "availability",
+          "coverageKm"
+        ]
+      },
+      "QuoteRequestCreate": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "preferred": {
+            "type": "string",
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "service",
+          "description"
+        ]
+      },
+      "QuoteRequestCounts": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "integer"
+          },
+          "new": {
+            "type": "integer"
+          },
+          "quoted": {
+            "type": "integer"
+          },
+          "scheduled": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "all",
+          "new",
+          "quoted",
+          "scheduled"
+        ]
+      },
+      "QuoteRequestPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteRequest"
+            }
+          },
+          "counts": {
+            "$ref": "#/components/schemas/QuoteRequestCounts"
+          }
+        },
+        "required": [
+          "items",
+          "counts"
+        ]
+      },
+      "QuoteCreate": {
+        "type": "object",
+        "properties": {
+          "priceKobo": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "scope": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "priceKobo"
+        ]
+      },
       "OtpRequested": {
         "type": "object",
         "properties": {
@@ -1297,6 +1568,23 @@
         },
         "required": [
           "phone"
+        ]
+      },
+      "RateItem": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "fromKobo": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "name"
         ]
       },
       "ListingAttributes": {
@@ -1392,6 +1680,36 @@
               "unregistered",
               "custom_papers"
             ]
+          },
+          "serviceType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "rateCard": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RateItem"
+            },
+            "maxItems": 12
+          },
+          "coverageKm": {
+            "type": "integer"
+          },
+          "coverageAnywhere": {
+            "type": "boolean"
+          },
+          "availability": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "today",
+                "this_week",
+                "emergency"
+              ]
+            },
+            "maxItems": 3
           }
         }
       },
@@ -1414,7 +1732,8 @@
             "enum": [
               "goods",
               "property",
-              "vehicles"
+              "vehicles",
+              "services"
             ]
           },
           "category": {
@@ -1530,7 +1849,8 @@
             "enum": [
               "goods",
               "property",
-              "vehicles"
+              "vehicles",
+              "services"
             ],
             "default": "goods"
           },
@@ -1805,6 +2125,29 @@
           "contentType"
         ]
       },
+      "DealTerms": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startsAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "service"
+        ]
+      },
       "Deal": {
         "type": "object",
         "properties": {
@@ -1845,6 +2188,9 @@
           "qty": {
             "type": "integer",
             "exclusiveMinimum": 0
+          },
+          "terms": {
+            "$ref": "#/components/schemas/DealTerms"
           },
           "createdAt": {
             "type": "string"
@@ -4144,6 +4490,292 @@
         }
       }
     },
+    "/services/catalog": {
+      "get": {
+        "summary": "Service groups and types, coverage rings and availability flags (13i)",
+        "tags": [
+          "services"
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceCatalog"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/listings/{id}/quote-requests": {
+      "post": {
+        "summary": "Request a quote from a service provider; replaces the thread's open request",
+        "tags": [
+          "services"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteRequestCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Own listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Not a live services listing, or a quote is live in this thread (quote_live)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown area",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/quote-requests": {
+      "get": {
+        "summary": "Quote requests sent to me as a provider, newest first, with New/Quoted/Scheduled counts",
+        "tags": [
+          "services"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "new",
+                "quoted",
+                "scheduled",
+                "done"
+              ]
+            },
+            "required": false,
+            "name": "stage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteRequestPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/quote-requests/{id}/quote": {
+      "post": {
+        "summary": "Answer a quote request with a price (opens a deal awaiting the buyer)",
+        "tags": [
+          "services"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Quoted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Request closed, listing unavailable, or a quote is already live (counter it instead)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Start date in the past",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/otp/request": {
       "post": {
         "summary": "Request a phone OTP (rate-limited)",
@@ -4325,7 +4957,8 @@
               "enum": [
                 "goods",
                 "property",
-                "vehicles"
+                "vehicles",
+                "services"
               ]
             },
             "required": false,
@@ -4398,7 +5031,8 @@
               "enum": [
                 "goods",
                 "property",
-                "vehicles"
+                "vehicles",
+                "services"
               ]
             },
             "required": false,
@@ -4634,6 +5268,28 @@
             },
             "required": false,
             "name": "registration",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "required": false,
+            "name": "serviceType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "today",
+                "this_week",
+                "emergency"
+              ]
+            },
+            "required": false,
+            "name": "availability",
             "in": "query"
           },
           {
@@ -5029,7 +5685,7 @@
             }
           },
           "409": {
-            "description": "Listing unavailable",
+            "description": "Listing unavailable, lead-gen lane, or a services listing (the provider quotes first)",
             "content": {
               "application/json": {
                 "schema": {

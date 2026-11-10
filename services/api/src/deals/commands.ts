@@ -33,9 +33,13 @@ export type DealRow = {
   state_token: string;
   price_kobo: string | number;
   qty: number;
+  /** Service quotes only (0025): what the price is for, and when the job starts. */
+  terms: DealTerms | null;
   created_at: string | Date;
   updated_at: string | Date;
 };
+
+export type DealTerms = { service: string; scope?: string | null; startsAt?: string | null };
 
 export type CommandResult =
   | { ok: true; deal: DealRow; replay?: boolean }
@@ -47,18 +51,46 @@ export type CommandResult =
 
 export type CreateResult =
   | { ok: true; deal: DealRow; existing?: boolean }
-  | { ok: false; code: "listing_unavailable" | "own_listing" | "lead_gen_lane" };
+  | { ok: false; code: "listing_unavailable" | "own_listing" | "lead_gen_lane" | "quote_first" };
+
+export type QuoteResult =
+  | { ok: true; deal: DealRow }
+  | { ok: false; code: "request_not_found" | "request_closed" | "deal_active" | "listing_unavailable" };
+
+/**
+ * Service deals keep the machine's states but not all of its clocks: a quote is
+ * weighed (and a job scheduled) on a human timescale, so negotiation gets two days
+ * rather than four hours, and escrow's "hand off within 72h" counts from the job's
+ * start date — a job booked for next Saturday must not auto-refund on Wednesday.
+ */
+const SERVICE_NEGOTIATION_HOURS = 48;
+const NEGOTIATION: readonly DealState[] = ["OFFERED", "COUNTERED_BY_SELLER", "COUNTERED_BY_BUYER", "ACCEPTED"];
 
 /** Set/refresh the single active deadline for a deal's new state, or clear it. */
-async function syncDeadline(sql: Tx, dealId: string, state: DealState, token: string) {
+async function syncDeadline(
+  sql: Tx,
+  dealId: string,
+  state: DealState,
+  token: string,
+  terms: DealTerms | null = null,
+) {
   const d = DEADLINES[state];
   if (!d) {
     await sql`delete from public.deal_deadlines where deal_id = ${dealId}`;
     return;
   }
+  let hours = d.hours;
+  // Escrow hand-off clock for a scheduled job: d.hours after the later of now and the start.
+  let from = sql`now()`;
+  if (terms) {
+    if (NEGOTIATION.includes(state)) hours = SERVICE_NEGOTIATION_HOURS;
+    if (state === "PAID_IN_ESCROW" && terms.startsAt) {
+      from = sql`greatest(now(), ${new Date(terms.startsAt)}::timestamptz)`;
+    }
+  }
   await sql`
     insert into public.deal_deadlines (deal_id, due_at, action, state_token)
-    values (${dealId}, now() + make_interval(hours => ${d.hours}), ${d.action}, ${token})
+    values (${dealId}, ${from} + make_interval(hours => ${hours}), ${d.action}, ${token})
     on conflict (deal_id) do update
       set due_at = excluded.due_at, action = excluded.action, state_token = excluded.state_token
   `;
@@ -77,6 +109,8 @@ export async function createOffer(
     if (!listing || listing.status !== "active") return { ok: false, code: "listing_unavailable" };
     // Vehicles are lead-gen (22b): enquire, inspect, pay the dealer offline — no escrow.
     if (listing.lane === "vehicles") return { ok: false, code: "lead_gen_lane" };
+    // Services flip the rule (22c-quotecard): the provider names the first price.
+    if (listing.lane === "services") return { ok: false, code: "quote_first" };
     if (listing.seller_id === p.buyerId) return { ok: false, code: "own_listing" };
 
     // One active negotiation per (listing, buyer): dedupes double-taps + reopens.
@@ -103,6 +137,71 @@ export async function createOffer(
       insert into public.outbox (topic, payload, deal_id, event_seq)
       values ('deal.created',
         ${sql.json({ dealId: deal!.id, seq: 1, listingId: p.listingId, buyerId: p.buyerId, sellerId: listing.seller_id })},
+        ${deal!.id}, 1)
+    `;
+    return { ok: true, deal: deal! };
+  });
+}
+
+/**
+ * Genesis for Services: the provider answers an open quote request with a price →
+ * a new deal in COUNTERED_BY_SELLER (awaiting the buyer: accept, counter, or let it
+ * lapse). The request records which deal answered it.
+ */
+export async function createQuote(
+  db: Sql,
+  p: {
+    requestId: string;
+    sellerId: string;
+    priceKobo: number;
+    terms: DealTerms;
+    idempotencyKey?: string;
+  },
+): Promise<QuoteResult> {
+  return db.begin(async (sql) => {
+    const [req] = await sql<{ listing_id: string; buyer_id: string; status: string; deal_id: string | null }[]>`
+      select listing_id, buyer_id, status, deal_id from public.quote_requests
+      where id = ${p.requestId} and seller_id = ${p.sellerId}
+      for update
+    `;
+    if (!req) return { ok: false, code: "request_not_found" };
+    if (req.status !== "open") return { ok: false, code: "request_closed" };
+
+    const [listing] = await sql<{ status: string }[]>`
+      select status from public.listings where id = ${req.listing_id} for update
+    `;
+    if (!listing || listing.status !== "active") return { ok: false, code: "listing_unavailable" };
+
+    // A live quote is revised with "counter", not a second genesis (and the
+    // one-active-deal index would refuse it anyway).
+    const [active] = await sql<DealRow[]>`
+      select * from public.deals
+      where listing_id = ${req.listing_id} and buyer_id = ${req.buyer_id}
+        and state <> all (public.deal_terminal_states())
+      limit 1
+    `;
+    if (active) return { ok: false, code: "deal_active" };
+
+    const [deal] = await sql<DealRow[]>`
+      insert into public.deals (listing_id, buyer_id, seller_id, state, price_kobo, qty, terms)
+      values (${req.listing_id}, ${req.buyer_id}, ${p.sellerId}, 'COUNTERED_BY_SELLER', ${p.priceKobo}, 1,
+              ${sql.json(p.terms)})
+      returning *
+    `;
+    await sql`
+      insert into public.deal_events
+        (deal_id, seq, actor, actor_id, action, from_state, to_state, price_kobo, qty, idempotency_key)
+      values (${deal!.id}, 1, 'SELLER', ${p.sellerId}, 'quote', null, 'COUNTERED_BY_SELLER', ${p.priceKobo}, 1,
+              ${p.idempotencyKey ?? null})
+    `;
+    await sql`update public.quote_requests set deal_id = ${deal!.id} where id = ${p.requestId}`;
+    await sql`update public.conversations set last_message_at = now()
+      where listing_id = ${req.listing_id} and buyer_id = ${req.buyer_id}`;
+    await syncDeadline(sql, deal!.id, "COUNTERED_BY_SELLER", deal!.state_token, p.terms);
+    await sql`
+      insert into public.outbox (topic, payload, deal_id, event_seq)
+      values ('deal.created',
+        ${sql.json({ dealId: deal!.id, seq: 1, listingId: req.listing_id, buyerId: req.buyer_id, sellerId: p.sellerId, quote: true })},
         ${deal!.id}, 1)
     `;
     return { ok: true, deal: deal! };
@@ -202,7 +301,7 @@ export async function transition(
       values (${p.dealId}, ${next_seq}, ${p.actor}, ${p.actorId ?? null}, ${action}, ${p.action},
               ${deal.state}, ${to}, ${p.priceKobo ?? null}, ${p.qty ?? null}, ${p.reason ?? null}, ${p.idempotencyKey ?? null})
     `;
-    await syncDeadline(sql, p.dealId, to, newToken);
+    await syncDeadline(sql, p.dealId, to, newToken, updated[0]!.terms);
     await sql`
       insert into public.outbox (topic, payload, deal_id, event_seq)
       values ('deal.transition',

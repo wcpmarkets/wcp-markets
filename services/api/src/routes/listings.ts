@@ -13,6 +13,7 @@ import {
   isKnownMake,
   maxYear,
 } from "../data/vehicles.js";
+import { AVAILABILITY, COVERAGE_KM, MAX_RATE_ITEMS, isServiceGroup } from "../data/services.js";
 import {
   LISTING_IMAGES_BUCKET,
   createSignedDownloadUrl,
@@ -38,7 +39,7 @@ const SELLER_STATUSES = ["draft", "active", "sold", "archived"] as const;
  */
 const STATUSES = [...SELLER_STATUSES, "under_review", "removed"] as const;
 const MODERATED: readonly string[] = ["under_review", "removed"];
-const LANES = ["goods", "property", "vehicles"] as const;
+const LANES = ["goods", "property", "vehicles", "services"] as const;
 const PROPERTY_TYPES = ["apartment", "house", "land", "commercial", "shop", "office"] as const;
 const DEAL_TYPES = ["rent", "sale"] as const;
 const IMAGE_TYPES = {
@@ -54,6 +55,14 @@ const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 // the right ones per lane (see the create handler). Property: type, rent|sale,
 // beds, baths. Vehicles: make, model, year, mileage, transmission, fuel, body,
 // condition, registration (design 13h).
+/** One line of a provider's rate card (13i): a price "from", or none = "Quote". */
+const RateItemSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    fromKobo: z.number().int().positive().optional(),
+  })
+  .openapi("RateItem");
+
 const ListingAttributesSchema = z
   .object({
     propertyType: z.enum(PROPERTY_TYPES).optional(),
@@ -69,8 +78,41 @@ const ListingAttributesSchema = z
     body: z.enum(BODIES).optional(),
     vehicleCondition: z.enum(VEHICLE_CONDITIONS).optional(),
     registration: z.enum(REGISTRATIONS).optional(),
+    // Services (13i): the type within the category group, the rate card, where the
+    // provider travels (a ring around their area, or anywhere in the state), and
+    // optional availability flags buyers filter on.
+    serviceType: z.string().trim().min(1).max(60).optional(),
+    rateCard: z.array(RateItemSchema).max(MAX_RATE_ITEMS).optional(),
+    coverageKm: z.number().int().optional(),
+    coverageAnywhere: z.boolean().optional(),
+    availability: z.array(z.enum(AVAILABILITY)).max(AVAILABILITY.length).optional(),
   })
   .openapi("ListingAttributes");
+
+/**
+ * Services must say what they are, carry at least one rate line, and say where they
+ * cover — coverage is the lane's primary search facet, so it needs a real area.
+ */
+function serviceProblem(
+  category: string,
+  a: z.infer<typeof ListingAttributesSchema> | undefined,
+  state: string | undefined,
+  city: string | undefined,
+): string | null {
+  if (!isServiceGroup(category)) return "unknown_service_category";
+  if (!a?.serviceType || !a.rateCard?.length) return "service_needs_details";
+  if (!state || !city) return "service_needs_area";
+  if (!a.coverageAnywhere && !(COVERAGE_KM as readonly number[]).includes(a.coverageKm ?? -1)) {
+    return "service_needs_coverage";
+  }
+  return null;
+}
+
+/** A service's card price is its cheapest "from" line; all-quote cards show "Quote" (0). */
+function serviceFromKobo(a: z.infer<typeof ListingAttributesSchema> | undefined): number {
+  const prices = (a?.rateCard ?? []).map((i) => i.fromKobo).filter((k): k is number => k != null);
+  return prices.length ? Math.min(...prices) : 0;
+}
 
 /** Vehicles must carry every facet the lane's cards, filters and detail show. */
 function vehicleProblem(a: z.infer<typeof ListingAttributesSchema> | undefined): string | null {
@@ -389,6 +431,12 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         const problem = vehicleProblem(b.attributes);
         if (problem) return c.json({ error: problem }, 422);
       }
+      if (b.lane === "services") {
+        const problem = serviceProblem(b.category, b.attributes, b.state, b.city);
+        if (problem) return c.json({ error: problem }, 422);
+      }
+      // A service's listed price is derived from its rate card, never typed twice.
+      const priceKobo = b.lane === "services" ? serviceFromKobo(b.attributes) : b.priceKobo;
       // A seller who won't share their location still gets placed, at the centre
       // of the area they chose. Without this they'd be tagged to an area but fall
       // out of every ring drawn around it, which reads as a bug.
@@ -400,7 +448,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
            condition, attributes, location, state, city, lat, lng)
         values (
           ${user.sub}, ${b.lane}, ${b.category}, ${b.title}, ${b.description ?? null},
-          ${b.priceKobo}, ${b.negotiable ?? true}, ${b.lane === "vehicles" ? 1 : (b.stock ?? 1)},
+          ${priceKobo}, ${b.negotiable ?? true}, ${b.lane === "vehicles" || b.lane === "services" ? 1 : (b.stock ?? 1)},
           ${b.lane === "vehicles" ? (b.attributes?.vehicleCondition === "brand_new" ? "new" : "used") : (b.condition ?? "used")},
           ${db.json(b.attributes ?? {})},
           ${b.location ?? null}, ${b.state ?? null}, ${b.city ?? null}, ${lat}, ${lng}
@@ -488,6 +536,9 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           body: z.enum(BODIES).optional(),
           vehicleCondition: z.enum(VEHICLE_CONDITIONS).optional(),
           registration: z.enum(REGISTRATIONS).optional(),
+          // Services (22c browse): the type within a group, and availability flags.
+          serviceType: z.string().max(60).optional(),
+          availability: z.enum(AVAILABILITY).optional(),
           /** relevance (default; newest when there's no query), price, newest, or lowest mileage. */
           sort: z.enum(["relevance", "price_asc", "price_desc", "newest", "mileage_asc"]).optional(),
           limit: z.coerce.number().int().min(1).max(50).optional(),
@@ -511,7 +562,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       const {
         q, lane, category, condition, minPrice, maxPrice, location,
         make, model, minYear, maxYear: maxYr, maxMileageKm, transmission, fuel, body,
-        vehicleCondition, registration, sort, ...rest
+        vehicleCondition, registration, serviceType, availability, sort, ...rest
       } = c.req.valid("query");
       const limit = c.req.valid("query").limit ?? 20;
       const offset = c.req.valid("query").offset ?? 0;
@@ -537,6 +588,8 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (body) where = db`${where} and attributes->>'body' = ${body}`;
       if (vehicleCondition) where = db`${where} and attributes->>'vehicleCondition' = ${vehicleCondition}`;
       if (registration) where = db`${where} and attributes->>'registration' = ${registration}`;
+      if (serviceType) where = db`${where} and attributes->>'serviceType' = ${serviceType}`;
+      if (availability) where = db`${where} and attributes->'availability' ? ${availability}`;
       if (q)
         // FTS match OR a fuzzy word-similarity match on the title (typo tolerance;
         // word_similarity finds the best-matching word within the title, so a long
