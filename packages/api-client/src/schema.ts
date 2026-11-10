@@ -1972,6 +1972,230 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/listings/{id}/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Book shortlet dates (instant book); then pay the deal into escrow */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["BookingCreate"];
+                };
+            };
+            responses: {
+                /** @description Booked — awaiting payment */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingCreated"];
+                    };
+                };
+                /** @description Own listing */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Blocked */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not a live shortlet, dates taken (dates_unavailable), or a booking here is already in progress (deal_active) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Bad dates (invalid_dates, past_date, too_far_ahead, stay_too_long), min_nights, too_many_guests */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/listings/{id}/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A shortlet's booked nights from today on (dates only — never who) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Booked ranges */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Availability"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/deals/{id}/claim-deposit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Host claims a shortlet's caution deposit for damage (admin decides) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["DepositClaim"];
+                };
+            };
+            responses: {
+                /** @description Claim opened */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DepositClaimed"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not claimable: outside the window after checkout, or no deposit held (no_deposit) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/otp/request": {
         parameters: {
             query?: never;
@@ -2566,7 +2790,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Listing unavailable, lead-gen lane, or a services listing (the provider quotes first) */
+                /** @description Listing unavailable, lead-gen lane, a services listing (the provider quotes first), or a shortlet (book_first) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -4125,6 +4349,7 @@ export interface components {
             id: string;
             title: string;
             lane: string;
+            dealType?: string;
             priceKobo: number;
             status: string;
             imageUrl: string | null;
@@ -4361,6 +4586,32 @@ export interface components {
             startsAt?: string;
             milestones?: components["schemas"]["StagePlan"][];
         };
+        BookingCreated: {
+            /** Format: uuid */
+            dealId: string;
+            /** Format: uuid */
+            conversationId: string;
+        };
+        BookingCreate: {
+            checkIn: string;
+            checkOut: string;
+            guests: number;
+        };
+        BookedRange: {
+            checkIn: string;
+            checkOut: string;
+        };
+        Availability: {
+            booked: components["schemas"]["BookedRange"][];
+        };
+        DepositClaimed: {
+            /** Format: uuid */
+            dealId: string;
+        };
+        DepositClaim: {
+            reason: string;
+            evidence?: string;
+        };
         OtpRequested: {
             /** @enum {string} */
             status: "sent";
@@ -4376,9 +4627,13 @@ export interface components {
             /** @enum {string} */
             propertyType?: "apartment" | "house" | "land" | "commercial" | "shop" | "office";
             /** @enum {string} */
-            dealType?: "rent" | "sale";
+            dealType?: "rent" | "sale" | "shortlet";
             beds?: number;
             baths?: number;
+            minNights?: number;
+            maxGuests?: number;
+            cleaningKobo?: number;
+            cautionKobo?: number;
             make?: string;
             model?: string;
             year?: number;
@@ -4496,18 +4751,28 @@ export interface components {
             /** @enum {string} */
             contentType: "image/jpeg" | "image/png" | "image/webp";
         };
+        BookingTerms: {
+            checkIn: string;
+            checkOut: string;
+            guests: number;
+            nights: number;
+            nightlyKobo: number;
+            cleaningKobo: number;
+            cautionKobo: number;
+        };
         DealTerms: {
             service: string;
             scope?: string | null;
             startsAt?: string | null;
             milestones?: components["schemas"]["StagePlan"][];
+            booking?: components["schemas"]["BookingTerms"];
         };
         DealMilestone: {
             idx: number;
             title: string;
             amountKobo: number;
             /** @enum {string} */
-            status: "proposed" | "held" | "releasing" | "released" | "refunded";
+            status: "proposed" | "held" | "releasing" | "released" | "refunding" | "refunded";
             releasedAt?: string;
         };
         Deal: {

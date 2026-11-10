@@ -22,7 +22,26 @@ export const StagePlanSchema = z
   })
   .openapi("StagePlan");
 
-/** A service quote's terms (22c-quotecard: Service · Scope · When). Absent on goods deals. */
+/**
+ * A shortlet booking (22a-shortlet): dates (YYYY-MM-DD, Lagos; check-in from 2pm,
+ * checkout by 11am) and how the price was built. Fixed when booked.
+ */
+const BookingTermsSchema = z
+  .object({
+    checkIn: z.string(),
+    checkOut: z.string(),
+    guests: z.number().int().positive(),
+    nights: z.number().int().positive(),
+    nightlyKobo: z.number().int().nonnegative(),
+    cleaningKobo: z.number().int().nonnegative(),
+    cautionKobo: z.number().int().nonnegative(),
+  })
+  .openapi("BookingTerms");
+
+/**
+ * What a deal is for, beyond a price: a service quote's terms (22c-quotecard: Service ·
+ * Scope · When), or a shortlet booking's (service = the listing title). Absent on goods deals.
+ */
 export const DealTermsSchema = z
   .object({
     service: z.string(),
@@ -30,19 +49,22 @@ export const DealTermsSchema = z
     startsAt: z.string().nullable().optional(),
     /** A staged quote: stages summing to the price, released one by one (22c-milestone). */
     milestones: z.array(StagePlanSchema).max(MAX_STAGES).optional(),
+    /** A shortlet booking: stages are [Stay, Caution deposit?]. */
+    booking: BookingTermsSchema.optional(),
   })
   .openapi("DealTerms");
 
 /**
  * A staged job's stage and where its money is (22c-milestone). "proposed" until the
- * buyer funds escrow; then held → releasing → released (or refunded).
+ * buyer funds escrow; then held → releasing → released (or refunded). A shortlet's
+ * caution deposit goes back while the booking stands: held → refunding → refunded.
  */
 const DealMilestoneSchema = z
   .object({
     idx: z.number().int().positive(),
     title: z.string(),
     amountKobo: z.number().int().positive(),
-    status: z.enum(["proposed", "held", "releasing", "released", "refunded"]),
+    status: z.enum(["proposed", "held", "releasing", "released", "refunding", "refunded"]),
     releasedAt: z.string().optional(),
   })
   .openapi("DealMilestone");
@@ -188,7 +210,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         400: { description: "Cannot offer on own listing", content: { "application/json": { schema: ErrorSchema } } },
         401: { description: "Unauthorized" },
         403: { description: "Blocked", content: { "application/json": { schema: ErrorSchema } } },
-        409: { description: "Listing unavailable, lead-gen lane, or a services listing (the provider quotes first)", content: { "application/json": { schema: ErrorSchema } } },
+        409: { description: "Listing unavailable, lead-gen lane, a services listing (the provider quotes first), or a shortlet (book_first)", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -212,6 +234,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         if (r.code === "own_listing") return c.json({ error: "cannot_offer_own_listing" }, 400);
         if (r.code === "lead_gen_lane") return c.json({ error: "lead_gen_lane" }, 409);
         if (r.code === "quote_first") return c.json({ error: "quote_first" }, 409);
+        if (r.code === "book_first") return c.json({ error: "book_first" }, 409);
         return c.json({ error: "listing_unavailable" }, 409);
       }
       return c.json(toDeal(r.deal, user.sub), 201);

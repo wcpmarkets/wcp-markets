@@ -23,6 +23,8 @@ const ConversationListingSchema = z
     id: z.string().uuid(),
     title: z.string(),
     lane: z.string(),
+    /** Property only: rent | sale | shortlet — a shortlet thread books dates, never offers. */
+    dealType: z.string().optional(),
     priceKobo: z.number().int().nonnegative(),
     status: z.string(),
     imageUrl: z.string().nullable(),
@@ -89,6 +91,7 @@ type ConvRow = {
   listing_id: string;
   title: string;
   lane: string;
+  deal_type: string | null;
   price_kobo: string | number;
   status: string;
   image_path: string | null;
@@ -106,7 +109,7 @@ type ConvRow = {
 function convQuery(db: Sql, me: string) {
   return db`
     select c.id, c.buyer_id, c.seller_id, c.created_at, c.last_message_at,
-      l.id as listing_id, l.title, l.lane, l.price_kobo, l.status, l.image_paths[1] as image_path,
+      l.id as listing_id, l.title, l.lane, l.attributes->>'dealType' as deal_type, l.price_kobo, l.status, l.image_paths[1] as image_path,
       lm.body as last_body, lm.sender_id as last_sender, lm.created_at as last_at,
       (select count(*)::int from public.messages m
         where m.conversation_id = c.id and m.sender_id <> ${me}
@@ -153,6 +156,7 @@ async function toConversations(db: Sql, me: string, rows: ConvRow[]) {
           id: r.listing_id,
           title: r.title,
           lane: r.lane,
+          dealType: r.deal_type ?? undefined,
           priceKobo: Number(r.price_kobo),
           status: r.status,
           imageUrl: r.image_path ? await createSignedDownloadUrl(LISTING_IMAGES_BUCKET, r.image_path) : null,

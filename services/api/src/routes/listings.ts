@@ -41,7 +41,7 @@ const STATUSES = [...SELLER_STATUSES, "under_review", "removed"] as const;
 const MODERATED: readonly string[] = ["under_review", "removed"];
 const LANES = ["goods", "property", "vehicles", "services"] as const;
 const PROPERTY_TYPES = ["apartment", "house", "land", "commercial", "shop", "office"] as const;
-const DEAL_TYPES = ["rent", "sale"] as const;
+const DEAL_TYPES = ["rent", "sale", "shortlet"] as const;
 const IMAGE_TYPES = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -50,6 +50,8 @@ const IMAGE_TYPES = {
 
 // ── Schemas (all named → clean TS/Kotlin/Swift codegen) ──────────────────────
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
+/** ₦1,000 — a shortlet's nightly rate floor (escrow fees floor at ₦100). */
+const MIN_NIGHTLY_KOBO = 100_000;
 
 // Lane-specific facets (a JSON attribute set). All optional here; the API requires
 // the right ones per lane (see the create handler). Property: type, rent|sale,
@@ -69,6 +71,13 @@ const ListingAttributesSchema = z
     dealType: z.enum(DEAL_TYPES).optional(),
     beds: z.number().int().min(0).max(50).optional(),
     baths: z.number().int().min(0).max(50).optional(),
+    // Shortlets (13g-shortlet): the price is per night; a stay is at least minNights,
+    // for up to maxGuests; a one-off cleaning fee and a refundable caution deposit
+    // are added at booking (22a-shortlet).
+    minNights: z.number().int().min(1).max(30).optional(),
+    maxGuests: z.number().int().min(1).max(20).optional(),
+    cleaningKobo: z.number().int().min(0).optional(),
+    cautionKobo: z.number().int().min(0).optional(),
     make: z.string().trim().min(1).max(40).optional(),
     model: z.string().trim().min(1).max(40).optional(),
     year: z.number().int().optional(),
@@ -424,6 +433,14 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       // drive the whole browse/display shell for the lane.
       if (b.lane === "property" && (!b.attributes?.propertyType || !b.attributes?.dealType)) {
         return c.json({ error: "property_needs_type_and_deal" }, 422);
+      }
+      // A shortlet is booked and paid through escrow, so it needs a real nightly rate
+      // and the stay rules the booking screen prices from.
+      if (b.lane === "property" && b.attributes?.dealType === "shortlet") {
+        if (b.priceKobo < MIN_NIGHTLY_KOBO) return c.json({ error: "shortlet_needs_nightly_rate" }, 422);
+        if (b.attributes.minNights == null || b.attributes.maxGuests == null) {
+          return c.json({ error: "shortlet_needs_stay_rules" }, 422);
+        }
       }
       // Vehicles: every facet, from the catalogue's makes (or "Other"). A car is one
       // unit, and the goods condition column mirrors its new/used state.

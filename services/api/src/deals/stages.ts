@@ -1,4 +1,5 @@
-import type { Tx } from "./commands.js";
+import type { DealTerms, Tx } from "./commands.js";
+import { sellerFeeKobo, stageSellerFees } from "../money/fees.js";
 
 /**
  * Milestone escrow (22c-quotebuild, 22c-quotecard-staged, 22c-milestone).
@@ -10,6 +11,7 @@ import type { Tx } from "./commands.js";
  *
  *   held ─(buyer confirms / 48h / admin)→ releasing ─(release.settled)→ released
  *   held ─(refund.settled)→ refunded
+ *   held ─(deposit return)→ refunding ─(refund.settled, part)→ refunded   (shortlets)
  *
  * The buyer funds the whole price up front; the provider marks a stage done
  * (hand_off), the buyer confirms it and only that stage's money moves. A dispute
@@ -27,7 +29,7 @@ export type StageRow = {
   idx: number;
   title: string;
   amount_kobo: string | number;
-  status: "held" | "releasing" | "released" | "refunded";
+  status: "held" | "releasing" | "released" | "refunding" | "refunded";
   release_seq: number | null;
   provider_ref: string | null;
   released_at: string | Date | null;
@@ -72,4 +74,22 @@ export async function stagesOf(sql: Tx, dealId: string, lock = false): Promise<S
   return lock
     ? sql<StageRow[]>`select * from public.deal_milestones where deal_id = ${dealId} order by idx for update`
     : sql<StageRow[]>`select * from public.deal_milestones where deal_id = ${dealId} order by idx`;
+}
+
+/**
+ * The seller fee each stage carries when it releases. A staged job spreads the
+ * ordinary fee on the whole price across its stages. A shortlet booking is not a
+ * split price: the stay carries the ordinary fee on the stay, and the caution
+ * deposit carries none — it is the guest's money held against damage, and if a claim
+ * awards it to the host that is compensation, not a sale WCP takes a cut of.
+ */
+export function stageFees(terms: DealTerms | null | undefined, amounts: readonly number[]): number[] {
+  if (terms?.booking) return amounts.map((a, i) => (i === 0 ? sellerFeeKobo(a) : 0));
+  return stageSellerFees(amounts);
+}
+
+/** Stage fees for a deal read from the DB (settlement paths that only hold a deal id). */
+export async function stageFeesOf(sql: Tx, dealId: string, stages: readonly StageRow[]): Promise<number[]> {
+  const [d] = await sql<{ terms: DealTerms | null }[]>`select terms from public.deals where id = ${dealId}`;
+  return stageFees(d?.terms, stages.map((s) => Number(s.amount_kobo)));
 }

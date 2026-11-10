@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Sql, Tx } from "../deals/commands.js";
-import { buyerFeeKobo, sellerFeeKobo, stageSellerFees } from "./fees.js";
-import { stagesOf } from "../deals/stages.js";
+import { buyerFeeKobo, sellerFeeKobo } from "./fees.js";
+import { stageFeesOf, stagesOf } from "../deals/stages.js";
 
 /** A settlement webhook either booked its ledger or was refused (recorded, not booked). */
 export type SettleResult = { ok: true } | { ok: false; reason: string };
@@ -276,12 +276,41 @@ export async function settleStageRelease(
       return st.provider_ref === p.providerRef ? { ok: true } : { ok: false, reason: "already_released_diff_ref" };
     if (st.status !== "releasing") return { ok: false, reason: `stage_not_releasing:${st.status}` };
     const principal = Number(st.amount_kobo);
-    const sellerFee = stageSellerFees(stages.map((x) => Number(x.amount_kobo)))[st.idx - 1]!;
+    const sellerFee = (await stageFeesOf(sql, p.dealId, stages))[st.idx - 1]!;
     if (p.amountKobo !== principal - sellerFee)
       return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${principal - sellerFee}` };
     await writeRelease(sql, { dealId: p.dealId, seq: st.release_seq, principal, sellerFee, providerRef: p.providerRef });
     await sql`
       update public.deal_milestones set status = 'released', provider_ref = ${p.providerRef}, released_at = now()
+      where deal_id = ${p.dealId} and idx = ${p.part}
+    `;
+    return { ok: true };
+  });
+}
+
+/**
+ * Settle ONE stage's return to the buyer (refund.settled carrying part = stage idx) —
+ * a shortlet's caution deposit going back while the booking itself stands. Gated on
+ * the stage row like a stage release: only a stage the effect moved to 'refunding'
+ * settles, once, for exactly its amount. No fee moves: the buyer fee was for the
+ * escrow service, which the stay used.
+ */
+export async function settleStageReturn(
+  db: Sql,
+  p: { dealId: string; part: number; providerRef: string; amountKobo: number },
+): Promise<SettleResult> {
+  return db.begin(async (sql) => {
+    const stages = await stagesOf(sql, p.dealId, true);
+    const st = stages.find((x) => x.idx === p.part);
+    if (!st) return { ok: false, reason: "unknown_stage" };
+    if (st.status === "refunded")
+      return st.provider_ref === p.providerRef ? { ok: true } : { ok: false, reason: "already_refunded_diff_ref" };
+    if (st.status !== "refunding") return { ok: false, reason: `stage_not_refunding:${st.status}` };
+    const amount = Number(st.amount_kobo);
+    if (p.amountKobo !== amount) return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${amount}` };
+    await writeRefund(sql, { dealId: p.dealId, seq: st.release_seq, principal: amount, fee: 0, providerRef: p.providerRef });
+    await sql`
+      update public.deal_milestones set status = 'refunded', provider_ref = ${p.providerRef}, released_at = now()
       where deal_id = ${p.dealId} and idx = ${p.part}
     `;
     return { ok: true };

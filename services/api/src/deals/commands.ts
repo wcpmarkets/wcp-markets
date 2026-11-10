@@ -46,7 +46,27 @@ export type DealTerms = {
   startsAt?: string | null;
   /** A staged quote's plan (stages.ts) — materialised into deal_milestones on funding. */
   milestones?: StagePlan[];
+  /** A shortlet booking (22a-shortlet): the dates and how the price was made. */
+  booking?: BookingTerms;
 };
+
+/** A shortlet booking's dates (YYYY-MM-DD, Lagos) and price build-up, fixed at booking. */
+export type BookingTerms = {
+  checkIn: string;
+  checkOut: string;
+  guests: number;
+  nights: number;
+  nightlyKobo: number;
+  cleaningKobo: number;
+  cautionKobo: number;
+};
+
+/**
+ * Shortlet clock times (Africa/Lagos, UTC+1 all year): check-in from 2pm, checkout by
+ * 11am. The stay releases to the host at the checkout time.
+ */
+export const checkInAt = (date: string): Date => new Date(`${date}T13:00:00Z`);
+export const checkOutAt = (date: string): Date => new Date(`${date}T10:00:00Z`);
 
 export type CommandResult =
   | { ok: true; deal: DealRow; replay?: boolean }
@@ -58,7 +78,16 @@ export type CommandResult =
 
 export type CreateResult =
   | { ok: true; deal: DealRow; existing?: boolean }
-  | { ok: false; code: "listing_unavailable" | "own_listing" | "lead_gen_lane" | "quote_first" };
+  | { ok: false; code: "listing_unavailable" | "own_listing" | "lead_gen_lane" | "quote_first" | "book_first" };
+
+export type BookingResult =
+  | { ok: true; deal: DealRow; conversationId: string }
+  | {
+      ok: false;
+      code: "listing_unavailable" | "not_shortlet" | "own_listing" | "deal_active" | "dates_unavailable" |
+        "min_nights" | "too_many_guests";
+      minNights?: number;
+    };
 
 export type QuoteResult =
   | { ok: true; deal: DealRow }
@@ -87,9 +116,28 @@ async function syncDeadline(
     return;
   }
   let hours = d.hours;
+  // A shortlet runs on the calendar, not on hand-off clocks: escrow holds the stay
+  // until checkout, then the deposit for 48h (none held → complete straight away).
+  // Its negotiation is just "pay within 4h", the default — the dates are held meanwhile.
+  const booking = terms?.booking;
+  if (booking && (state === "PAID_IN_ESCROW" || state === "HANDED_OFF")) {
+    let due = checkOutAt(booking.checkOut);
+    const action: DealAction = state === "PAID_IN_ESCROW" ? "check_out" : d.action;
+    if (state === "HANDED_OFF") {
+      const [held] = await sql`select 1 from public.deal_milestones where deal_id = ${dealId} and status = 'held' limit 1`;
+      due = new Date(Date.now() + (held ? hours : 0) * 3_600_000);
+    }
+    await sql`
+      insert into public.deal_deadlines (deal_id, due_at, action, state_token)
+      values (${dealId}, ${due}, ${action}, ${token})
+      on conflict (deal_id) do update
+        set due_at = excluded.due_at, action = excluded.action, state_token = excluded.state_token
+    `;
+    return;
+  }
   // Escrow hand-off clock for a scheduled job: d.hours after the later of now and the start.
   let from = sql`now()`;
-  if (terms) {
+  if (terms && !booking) {
     if (NEGOTIATION.includes(state)) hours = SERVICE_NEGOTIATION_HOURS;
     if (state === "PAID_IN_ESCROW" && terms.startsAt) {
       from = sql`greatest(now(), ${new Date(terms.startsAt)}::timestamptz)`;
@@ -123,14 +171,16 @@ export async function createOffer(
 ): Promise<CreateResult> {
   return db.begin(async (sql) => {
     // Lock the listing so concurrent genesis on the same listing serialise.
-    const [listing] = await sql<{ seller_id: string; status: string; lane: string }[]>`
-      select seller_id, status, lane from public.listings where id = ${p.listingId} for update
+    const [listing] = await sql<{ seller_id: string; status: string; lane: string; deal_type: string | null }[]>`
+      select seller_id, status, lane, attributes->>'dealType' as deal_type from public.listings where id = ${p.listingId} for update
     `;
     if (!listing || listing.status !== "active") return { ok: false, code: "listing_unavailable" };
     // Vehicles are lead-gen (22b): enquire, inspect, pay the dealer offline — no escrow.
     if (listing.lane === "vehicles") return { ok: false, code: "lead_gen_lane" };
     // Services flip the rule (22c-quotecard): the provider names the first price.
     if (listing.lane === "services") return { ok: false, code: "quote_first" };
+    // A shortlet's price is per night and taken by booking dates (22a-shortlet).
+    if (listing.deal_type === "shortlet") return { ok: false, code: "book_first" };
     if (listing.seller_id === p.buyerId) return { ok: false, code: "own_listing" };
 
     // One active negotiation per (listing, buyer): dedupes double-taps + reopens.
@@ -236,6 +286,113 @@ export async function createQuote(
   });
 }
 
+/**
+ * The machine's generic actions that make no sense for a stay. A shortlet is never
+ * "handed off" or "received" (checkout is the calendar's), and once checked out the
+ * stay is paid — what's left in escrow is the deposit, which the host claims, not the
+ * guest. The shortlet-only actions are refused on everything else.
+ */
+function bookingRefuses(deal: DealRow, action: DealAction): boolean {
+  if (deal.terms?.booking) {
+    if (action === "hand_off" || action === "confirm_receipt") return true;
+    if (action === "dispute" && deal.state === "HANDED_OFF") return true;
+    return false;
+  }
+  return action === "check_out" || action === "claim_deposit" || action === "return_deposit";
+}
+
+const DAY_MS = 86_400_000;
+const nightsBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / DAY_MS);
+
+/**
+ * Genesis for shortlets (22a-shortlet): a guest books dates → a new deal in ACCEPTED
+ * (instant book: no host approval), awaiting payment. The price is built here from
+ * the listing — never from the client — and the dates are taken in the same tx; the
+ * bookings exclusion constraint is the backstop if two guests race.
+ */
+export async function createBooking(
+  db: Sql,
+  p: { listingId: string; buyerId: string; checkIn: string; checkOut: string; guests: number; idempotencyKey?: string },
+): Promise<BookingResult> {
+  return db.begin(async (sql) => {
+    const [listing] = await sql<{ seller_id: string; status: string; lane: string; title: string; price_kobo: string;
+      attributes: Record<string, unknown> }[]>`
+      select seller_id, status, lane, title, price_kobo, attributes from public.listings where id = ${p.listingId} for update
+    `;
+    if (!listing || listing.status !== "active") return { ok: false, code: "listing_unavailable" };
+    if (listing.lane !== "property" || listing.attributes.dealType !== "shortlet") return { ok: false, code: "not_shortlet" };
+    if (listing.seller_id === p.buyerId) return { ok: false, code: "own_listing" };
+    const a = listing.attributes as { minNights?: number; maxGuests?: number; cleaningKobo?: number; cautionKobo?: number };
+    const nights = nightsBetween(p.checkIn, p.checkOut);
+    const minNights = a.minNights ?? 1;
+    if (nights < minNights) return { ok: false, code: "min_nights", minNights };
+    if (a.maxGuests != null && p.guests > a.maxGuests) return { ok: false, code: "too_many_guests" };
+
+    const [active] = await sql`
+      select 1 from public.deals
+      where listing_id = ${p.listingId} and buyer_id = ${p.buyerId} and state <> all (public.deal_terminal_states())
+      limit 1
+    `;
+    if (active) return { ok: false, code: "deal_active" };
+    // Under the listing lock, so no concurrent booking can slip in between this check
+    // and the insert; the exclusion constraint still guards the table itself.
+    const [clash] = await sql`
+      select 1 from public.bookings
+      where listing_id = ${p.listingId} and active
+        and daterange(check_in, check_out, '[)') && daterange(${p.checkIn}::date, ${p.checkOut}::date, '[)')
+      limit 1
+    `;
+    if (clash) return { ok: false, code: "dates_unavailable" };
+
+    const nightlyKobo = Number(listing.price_kobo);
+    const cleaningKobo = a.cleaningKobo ?? 0;
+    const cautionKobo = a.cautionKobo ?? 0;
+    const stayKobo = nightlyKobo * nights + cleaningKobo;
+    const priceKobo = stayKobo + cautionKobo;
+    const terms: DealTerms = {
+      service: listing.title,
+      booking: { checkIn: p.checkIn, checkOut: p.checkOut, guests: p.guests, nights, nightlyKobo, cleaningKobo, cautionKobo },
+      milestones: [
+        { title: "Stay", amountKobo: stayKobo },
+        ...(cautionKobo > 0 ? [{ title: "Caution deposit", amountKobo: cautionKobo }] : []),
+      ],
+    };
+
+    const [deal] = await sql<DealRow[]>`
+      insert into public.deals (listing_id, buyer_id, seller_id, state, price_kobo, qty, terms)
+      values (${p.listingId}, ${p.buyerId}, ${listing.seller_id}, 'ACCEPTED', ${priceKobo}, 1, ${sql.json(terms)})
+      returning *
+    `;
+    await sql`
+      insert into public.deal_events
+        (deal_id, seq, actor, actor_id, action, from_state, to_state, price_kobo, qty, idempotency_key)
+      values (${deal!.id}, 1, 'BUYER', ${p.buyerId}, 'book', null, 'ACCEPTED', ${priceKobo}, 1, ${p.idempotencyKey ?? null})
+    `;
+    await sql`
+      insert into public.bookings (deal_id, listing_id, check_in, check_out, guests)
+      values (${deal!.id}, ${p.listingId}, ${p.checkIn}, ${p.checkOut}, ${p.guests})
+    `;
+    await sql`
+      insert into public.conversations (listing_id, buyer_id, seller_id)
+      values (${p.listingId}, ${p.buyerId}, ${listing.seller_id})
+      on conflict (listing_id, buyer_id) do nothing
+    `;
+    const [conv] = await sql<{ id: string }[]>`
+      update public.conversations set last_message_at = now()
+      where listing_id = ${p.listingId} and buyer_id = ${p.buyerId}
+      returning id
+    `;
+    await syncDeadline(sql, deal!.id, "ACCEPTED", deal!.state_token, terms);
+    await sql`
+      insert into public.outbox (topic, payload, deal_id, event_seq)
+      values ('deal.created',
+        ${sql.json({ dealId: deal!.id, seq: 1, listingId: p.listingId, buyerId: p.buyerId, sellerId: listing.seller_id, booking: true })},
+        ${deal!.id}, 1)
+    `;
+    return { ok: true, deal: deal!, conversationId: conv!.id };
+  });
+}
+
 /** Apply a transition to an existing deal (user action or SYSTEM timer/webhook). */
 export async function transition(
   db: Sql,
@@ -284,6 +441,7 @@ export async function transition(
       return { ok: false, code: "stale" }; // a user action already moved the deal
     }
 
+    if (bookingRefuses(deal, p.action)) return { ok: false, code: "illegal", from: deal.state };
     const to0 = nextState(deal.state, p.actor, p.action);
     if (!to0) return { ok: false, code: "illegal", from: deal.state };
 

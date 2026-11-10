@@ -25,8 +25,8 @@ export type EscrowWebhook = {
   dealId: string;
   amountKobo: number;
   /**
-   * Which part of the deal this settles — a staged job's stage idx (release) or the
-   * deal's nth payout. Our metadata, echoed back by the partner; absent = the whole deal.
+   * Which part of the deal this settles — a staged job's stage idx (release), a
+   * shortlet deposit's stage idx (refund, the deal living on), or the deal's nth payout. Our metadata, echoed back by the partner; absent = the whole deal.
    */
   part?: number;
 };
@@ -39,7 +39,7 @@ export interface EscrowProvider {
   /** Pay out the seller's balance to their bank (L2-gated upstream). Settles by webhook. */
   payoutToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string; part?: number }): Promise<EscrowTxn>;
   /** Refund held funds to the buyer. Settlement arrives by webhook. */
-  refundToBuyer(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn>;
+  refundToBuyer(p: { dealId: string; amountKobo: number; idempotencyKey: string; part?: number }): Promise<EscrowTxn>;
   /** Look up a transaction (reconciliation). */
   getTransaction(providerRef: string): Promise<EscrowTxn | null>;
   /** Verify an inbound webhook's signature. */

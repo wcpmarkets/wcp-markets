@@ -3,7 +3,7 @@ import type { EscrowWebhook } from "@wcp/escrow";
 import type { AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import { transition, type Sql } from "../deals/commands.js";
-import { settlePayout, settleRefund, settleRelease, settleStageRelease } from "../money/ledger.js";
+import { settlePayout, settleRefund, settleRelease, settleStageRelease, settleStageReturn } from "../money/ledger.js";
 import { getEscrowProvider } from "../money/provider.js";
 
 /**
@@ -56,7 +56,10 @@ export function registerWebhooks(app: OpenAPIHono<AuthEnv>) {
       if (!r.ok && r.code !== "idempotency_reuse") await recordException(db, wh, `payment_failed:${r.code}`);
     } else if (wh.type === "refund.settled") {
       // The refund ledger is written HERE (settlement), not at oversold time.
-      const r = await settleRefund(db, { dealId: wh.dealId, amountKobo: wh.amountKobo, providerRef: wh.providerRef });
+      // A part = one stage going back while the deal lives on (a shortlet deposit).
+      const r = wh.part
+        ? await settleStageReturn(db, { dealId: wh.dealId, part: wh.part, providerRef: wh.providerRef, amountKobo: wh.amountKobo })
+        : await settleRefund(db, { dealId: wh.dealId, amountKobo: wh.amountKobo, providerRef: wh.providerRef });
       if (!r.ok) await recordException(db, wh, `refund.settled:${r.reason}`);
     } else if (wh.type === "release.settled") {
       // The release ledger is written HERE (settlement), not at confirm time.

@@ -14,6 +14,7 @@ import { registerReports } from "./routes/reports.js";
 import { registerVehicles } from "./routes/vehicles.js";
 import { registerViewings } from "./routes/viewings.js";
 import { registerServices } from "./routes/services.js";
+import { registerBookings } from "./routes/bookings.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -60,6 +61,8 @@ export function createApp() {
   registerVehicles(app);
   registerViewings(app);
   registerServices(app);
+  // ── Property shortlets: dated bookings into escrow (Phase 3 E) ─────────────
+  registerBookings(app);
 
   // ── POST /auth/otp/request ──────────────────────────────────────────────────
   // Throttled OTP request. Rate-limiting lives HERE (per-phone + per-IP) so a bare

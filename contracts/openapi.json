@@ -529,6 +529,9 @@
           "lane": {
             "type": "string"
           },
+          "dealType": {
+            "type": "string"
+          },
           "priceKobo": {
             "type": "integer",
             "minimum": 0
@@ -1569,6 +1572,106 @@
           "priceKobo"
         ]
       },
+      "BookingCreated": {
+        "type": "object",
+        "properties": {
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dealId",
+          "conversationId"
+        ]
+      },
+      "BookingCreate": {
+        "type": "object",
+        "properties": {
+          "checkIn": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "checkOut": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "guests": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "checkIn",
+          "checkOut",
+          "guests"
+        ]
+      },
+      "BookedRange": {
+        "type": "object",
+        "properties": {
+          "checkIn": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "checkOut": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          }
+        },
+        "required": [
+          "checkIn",
+          "checkOut"
+        ]
+      },
+      "Availability": {
+        "type": "object",
+        "properties": {
+          "booked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BookedRange"
+            }
+          }
+        },
+        "required": [
+          "booked"
+        ]
+      },
+      "DepositClaimed": {
+        "type": "object",
+        "properties": {
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dealId"
+        ]
+      },
+      "DepositClaim": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "evidence": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
       "OtpRequested": {
         "type": "object",
         "properties": {
@@ -1630,7 +1733,8 @@
             "type": "string",
             "enum": [
               "rent",
-              "sale"
+              "sale",
+              "shortlet"
             ]
           },
           "beds": {
@@ -1642,6 +1746,24 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 50
+          },
+          "minNights": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "maxGuests": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "cleaningKobo": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cautionKobo": {
+            "type": "integer",
+            "minimum": 0
           },
           "make": {
             "type": "string",
@@ -2150,6 +2272,46 @@
           "contentType"
         ]
       },
+      "BookingTerms": {
+        "type": "object",
+        "properties": {
+          "checkIn": {
+            "type": "string"
+          },
+          "checkOut": {
+            "type": "string"
+          },
+          "guests": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "nights": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "nightlyKobo": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cleaningKobo": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cautionKobo": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "checkIn",
+          "checkOut",
+          "guests",
+          "nights",
+          "nightlyKobo",
+          "cleaningKobo",
+          "cautionKobo"
+        ]
+      },
       "DealTerms": {
         "type": "object",
         "properties": {
@@ -2174,6 +2336,9 @@
               "$ref": "#/components/schemas/StagePlan"
             },
             "maxItems": 6
+          },
+          "booking": {
+            "$ref": "#/components/schemas/BookingTerms"
           }
         },
         "required": [
@@ -2201,6 +2366,7 @@
               "held",
               "releasing",
               "released",
+              "refunding",
               "refunded"
             ]
           },
@@ -4856,6 +5022,226 @@
         }
       }
     },
+    "/listings/{id}/bookings": {
+      "post": {
+        "summary": "Book shortlet dates (instant book); then pay the deal into escrow",
+        "tags": [
+          "bookings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Booked — awaiting payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Own listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not a live shortlet, dates taken (dates_unavailable), or a booking here is already in progress (deal_active)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Bad dates (invalid_dates, past_date, too_far_ahead, stay_too_long), min_nights, too_many_guests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/listings/{id}/availability": {
+      "get": {
+        "summary": "A shortlet's booked nights from today on (dates only — never who)",
+        "tags": [
+          "bookings"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Booked ranges",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Availability"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deals/{id}/claim-deposit": {
+      "post": {
+        "summary": "Host claims a shortlet's caution deposit for damage (admin decides)",
+        "tags": [
+          "bookings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DepositClaim"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Claim opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepositClaimed"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Not claimable: outside the window after checkout, or no deposit held (no_deposit)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/otp/request": {
       "post": {
         "summary": "Request a phone OTP (rate-limited)",
@@ -5765,7 +6151,7 @@
             }
           },
           "409": {
-            "description": "Listing unavailable, lead-gen lane, or a services listing (the provider quotes first)",
+            "description": "Listing unavailable, lead-gen lane, a services listing (the provider quotes first), or a shortlet (book_first)",
             "content": {
               "application/json": {
                 "schema": {

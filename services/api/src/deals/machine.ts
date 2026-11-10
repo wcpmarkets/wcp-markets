@@ -58,6 +58,7 @@ export type Actor = (typeof ACTORS)[number];
 export const DEAL_ACTIONS = [
   "offer", // genesis only (creates the deal in OFFERED) — not in the table
   "quote", // genesis only: a service provider quotes first (→ COUNTERED_BY_SELLER)
+  "book", // genesis only: a guest books shortlet dates — instant, so born agreed (→ ACCEPTED)
   "counter",
   "accept",
   "decline",
@@ -71,6 +72,9 @@ export const DEAL_ACTIONS = [
   "confirm_receipt",
   "auto_release",
   "release_stage", // a staged job: one stage released, more still held (redirected to by confirm/auto_release)
+  "check_out", // a shortlet's checkout time: the stay releases to the host, the deposit stays held
+  "claim_deposit", // a host claims a shortlet's caution deposit for damage (→ an admin decides)
+  "return_deposit", // an admin rejects a deposit claim: the deposit goes back, the stay stands (redirected to by resolve_refund)
   "dispute",
   "respond", // seller responds to a dispute (stops the 24h clock; → awaiting admin)
   "resolve_release",
@@ -138,6 +142,14 @@ export const TRANSITIONS: readonly Transition[] = [
   { from: "HANDED_OFF", actor: "BUYER", action: "release_stage", to: "PAID_IN_ESCROW", milestone: "M5" },
   { from: "HANDED_OFF", actor: "SYSTEM", action: "release_stage", to: "PAID_IN_ESCROW", milestone: "M5" },
 
+  // Shortlets (22a-shortlet): no hand-off — the stay is "delivered" by the calendar.
+  // At checkout the SYSTEM releases the stay; HANDED_OFF then means "checked out,
+  // caution deposit held", and its 48h auto_release returns the deposit to the guest
+  // (the booking effect, not a release to the host). Within those 48h the host may
+  // claim the deposit, which waits on an admin like a responded dispute.
+  { from: "PAID_IN_ESCROW", actor: "SYSTEM", action: "check_out", to: "HANDED_OFF", milestone: "M5" },
+  { from: "HANDED_OFF", actor: "SELLER", action: "claim_deposit", to: "DISPUTED_RESPONDED", milestone: "M6" },
+
   // ── Disputes (M6) ─────────────────────────────────────────────────────────
   { from: "PAID_IN_ESCROW", actor: "BUYER", action: "dispute", to: "DISPUTED", milestone: "M6" },
   { from: "HANDED_OFF", actor: "BUYER", action: "dispute", to: "DISPUTED", milestone: "M6" },
@@ -148,6 +160,10 @@ export const TRANSITIONS: readonly Transition[] = [
   // Seller responded → an admin (CX/support) adjudicates; no auto-timer here.
   { from: "DISPUTED_RESPONDED", actor: "ADMIN", action: "resolve_release", to: "COMPLETED", milestone: "M6" },
   { from: "DISPUTED_RESPONDED", actor: "ADMIN", action: "resolve_refund", to: "REFUNDED", milestone: "M6" },
+  // Rejecting a shortlet deposit claim returns the deposit but the stay happened and
+  // was paid for: the booking completes (and stays reviewable) rather than reading
+  // REFUNDED. resolve_refund's effect redirects here when the stay was released.
+  { from: "DISPUTED_RESPONDED", actor: "ADMIN", action: "return_deposit", to: "COMPLETED", milestone: "M6" },
 ] as const;
 
 /**

@@ -53,7 +53,8 @@ export const handler = async (event: SqsEvent) => {
         const txn = await provider.refundToBuyer({
           dealId: msg.dealId,
           amountKobo: msg.amount!,
-          idempotencyKey: `refund:${msg.dealId}`,
+          idempotencyKey: `refund:${msg.dealId}${suffix}`,
+          part,
         });
         await postWebhook(apiUrl, provider.buildWebhook({
           eventId: `${txn.providerRef}:settled`,
@@ -61,6 +62,7 @@ export const handler = async (event: SqsEvent) => {
           providerRef: txn.providerRef,
           dealId: msg.dealId,
           amountKobo: msg.amount!,
+          part,
         }));
       } else if (msg.topic === "escrow.release") {
         const txn = await provider.releaseToSeller({

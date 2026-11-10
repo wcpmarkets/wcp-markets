@@ -43,6 +43,8 @@ returns text language sql immutable as $$
     ('HANDED_OFF', 'SYSTEM', 'auto_release', 'COMPLETED'),
     ('HANDED_OFF', 'BUYER', 'release_stage', 'PAID_IN_ESCROW'),
     ('HANDED_OFF', 'SYSTEM', 'release_stage', 'PAID_IN_ESCROW'),
+    ('PAID_IN_ESCROW', 'SYSTEM', 'check_out', 'HANDED_OFF'),
+    ('HANDED_OFF', 'SELLER', 'claim_deposit', 'DISPUTED_RESPONDED'),
     ('PAID_IN_ESCROW', 'BUYER', 'dispute', 'DISPUTED'),
     ('HANDED_OFF', 'BUYER', 'dispute', 'DISPUTED'),
     ('DISPUTED', 'SYSTEM', 'auto_refund', 'REFUNDED'),
@@ -50,7 +52,8 @@ returns text language sql immutable as $$
     ('DISPUTED', 'ADMIN', 'resolve_release', 'COMPLETED'),
     ('DISPUTED', 'ADMIN', 'resolve_refund', 'REFUNDED'),
     ('DISPUTED_RESPONDED', 'ADMIN', 'resolve_release', 'COMPLETED'),
-    ('DISPUTED_RESPONDED', 'ADMIN', 'resolve_refund', 'REFUNDED')
+    ('DISPUTED_RESPONDED', 'ADMIN', 'resolve_refund', 'REFUNDED'),
+    ('DISPUTED_RESPONDED', 'ADMIN', 'return_deposit', 'COMPLETED')
   ) as t(from_state, actor, action, to_state)
   where from_state = p_from and actor = p_actor and action = p_action;
 $$;

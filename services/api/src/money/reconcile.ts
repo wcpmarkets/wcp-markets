@@ -30,7 +30,7 @@ export type ReconResult = {
   disputesOverdue: StuckDispute[];
   payoutsOverdue: string[]; // payout deal ids stuck 'pending'
   negativePayable: string[]; // deal ids with seller_payable < 0 (double-payout tripwire)
-  stagesOverdue: { dealId: string; idx: number }[]; // stage releases never settled
+  stagesOverdue: { dealId: string; idx: number }[]; // stage releases / deposit returns never settled
 };
 
 const PAYOUT_GRACE_MINS = 30;
@@ -84,7 +84,7 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
   // told the money was on its way. Non-terminal deals escape invariant 3, so watch it.
   const stagesStuck = await db<{ deal_id: string; idx: number }[]>`
     select deal_id, idx from public.deal_milestones
-    where status = 'releasing' and updated_at < now() - make_interval(mins => ${SETTLEMENT_GRACE_MINS})
+    where status in ('releasing', 'refunding') and updated_at < now() - make_interval(mins => ${SETTLEMENT_GRACE_MINS})
   `;
   const negPayable = await db<{ deal_id: string }[]>`
     select deal_id from public.ledger_entries where account = 'seller_payable'

@@ -1,8 +1,8 @@
 import type { DealRow, Tx } from "./commands.js";
 import type { DealAction, DealState } from "./machine.js";
-import { buyerFeeKobo, sellerFeeKobo, stageSellerFees } from "../money/fees.js";
+import { buyerFeeKobo, sellerFeeKobo } from "../money/fees.js";
 import { stageRefundKobo, writeHold } from "../money/ledger.js";
-import { stagesOf } from "./stages.js";
+import { stageFees, stagesOf, type StageRow } from "./stages.js";
 
 /**
  * Per-action side effects, run INSIDE the transition tx after the deal is locked and
@@ -44,6 +44,7 @@ function refundReason(action: DealAction, fromState: DealState): string {
 // ledger is written on the release.settled webhook (symmetry with the hold).
 const releaseFunds: Effect = async (sql, { deal, seq, action }) => {
   const stages = await stagesOf(sql, deal.id, true);
+  if (deal.terms?.booking) return bookingRelease(sql, deal, seq, action, stages);
   if (stages.length) return releaseStages(sql, deal, seq, action, stages);
   const principal = Number(deal.price_kobo);
   const sellerFee = sellerFeeKobo(principal);
@@ -69,7 +70,7 @@ const releaseStages = async (
   action: DealAction,
   stages: Awaited<ReturnType<typeof stagesOf>>,
 ): Promise<EffectResult> => {
-  const fees = stageSellerFees(stages.map((s) => Number(s.amount_kobo)));
+  const fees = stageFees(deal.terms, stages.map((s) => Number(s.amount_kobo)));
   const held = stages.filter((s) => s.status === "held");
   const all = action === "resolve_release";
   const now = all ? held : held.slice(0, 1);
@@ -91,11 +92,84 @@ const releaseStages = async (
   if (!all && held.length > now.length) return { redirectAction: "release_stage" };
 };
 
+// ── Shortlets ──────────────────────────────────────────────────────────────────
+// A booking's stages are [stay, caution deposit?]. Each moves on its own escrow
+// command (part = stage idx) and settles on its own webhook.
+
+/** Send one held stage to the host (net of its fee). */
+async function releaseStageToHost(sql: Tx, deal: DealRow, seq: number, st: StageRow, fee: number, reason: string) {
+  const principal = Number(st.amount_kobo);
+  await sql`
+    update public.deal_milestones set status = 'releasing', release_seq = ${seq}
+    where deal_id = ${deal.id} and idx = ${st.idx} and status = 'held'
+  `;
+  await sql`
+    insert into public.outbox (topic, payload, deal_id, event_seq)
+    values ('escrow.release',
+      ${sql.json({ dealId: deal.id, seq, part: st.idx, principal, sellerFee: fee, payout: principal - fee, reason })},
+      ${deal.id}, ${seq})
+  `;
+}
+
+/** Give one held stage back to the guest, the deal living on (no buyer fee back). */
+async function returnStageToGuest(sql: Tx, deal: DealRow, seq: number, st: StageRow, reason: string) {
+  await sql`
+    update public.deal_milestones set status = 'refunding', release_seq = ${seq}
+    where deal_id = ${deal.id} and idx = ${st.idx} and status = 'held'
+  `;
+  await sql`
+    insert into public.outbox (topic, payload, deal_id, event_seq)
+    values ('escrow.refund',
+      ${sql.json({ dealId: deal.id, seq, part: st.idx, amount: Number(st.amount_kobo), reason })},
+      ${deal.id}, ${seq})
+  `;
+}
+
+/**
+ * The booking's release paths:
+ *  · auto_release (48h after checkout, no claim) → the deposit goes back to the guest.
+ *  · resolve_release on a dispute raised DURING the stay → the stay goes to the host;
+ *    the deposit was never in question, so it goes back to the guest.
+ *  · resolve_release on a deposit claim (stay already paid) → the deposit to the host.
+ */
+async function bookingRelease(sql: Tx, deal: DealRow, seq: number, action: DealAction, stages: StageRow[]): Promise<EffectResult> {
+  const fees = stageFees(deal.terms, stages.map((s) => Number(s.amount_kobo)));
+  const [stay, deposit] = stages;
+  if (action === "resolve_release") {
+    if (stay?.status === "held") {
+      await releaseStageToHost(sql, deal, seq, stay, fees[0]!, "admin_release");
+      if (deposit?.status === "held") await returnStageToGuest(sql, deal, seq, deposit, "deposit_return");
+    } else if (deposit?.status === "held") {
+      await releaseStageToHost(sql, deal, seq, deposit, fees[1]!, "deposit_claim_upheld");
+    }
+    return;
+  }
+  if (deposit?.status === "held") await returnStageToGuest(sql, deal, seq, deposit, "deposit_return");
+}
+
+/** Checkout: the stay releases to the host; a deposit stays held for the claim window. */
+const checkOut: Effect = async (sql, { deal, seq }) => {
+  const stages = await stagesOf(sql, deal.id, true);
+  const stay = stages[0];
+  if (stay?.status !== "held") return;
+  const fees = stageFees(deal.terms, stages.map((s) => Number(s.amount_kobo)));
+  await releaseStageToHost(sql, deal, seq, stay, fees[0]!, "checkout");
+};
+
 // Seller cancels, the hand-off SLA lapses, a dispute times out, or an admin resolves
 // for the buyer → refund the buyer. Refund exactly what the hold booked (from the
 // ledger — the fee config may have changed since the hold), NOT a recomputation.
 // Refund ledger is written on the refund.settled webhook.
 const refundBuyer: Effect = async (sql, { deal, seq, action }) => {
+  // An admin rejecting a shortlet deposit claim: the stay was had and paid for, so
+  // only the deposit goes back and the booking completes (return_deposit).
+  if (deal.terms?.booking && action === "resolve_refund") {
+    const [stay, deposit] = await stagesOf(sql, deal.id, true);
+    if (stay && stay.status !== "held") {
+      if (deposit?.status === "held") await returnStageToGuest(sql, deal, seq, deposit, "deposit_claim_rejected");
+      return { redirectAction: "return_deposit" };
+    }
+  }
   const [held] = await sql<{ amount: string | null }[]>`
     select (-sum(amount_kobo))::bigint as amount
     from public.ledger_entries
@@ -125,6 +199,7 @@ const refundBuyer: Effect = async (sql, { deal, seq, action }) => {
 };
 
 export const EFFECTS: Partial<Record<DealAction, Effect>> = {
+  check_out: checkOut,
   // Buyer initiates payment → ask the escrow orchestrator to create the hold. No
   // ledger yet (funds not captured until the provider confirms).
   pay: async (sql, { deal, seq }) => {
@@ -169,6 +244,8 @@ export const EFFECTS: Partial<Record<DealAction, Effect>> = {
 
     // A service is a provider's time, not a unit on a shelf: a booked job never
     // sells out the listing, so only goods-style lanes decrement stock.
+    // A shortlet's dates are its stock (bookings), taken when it was booked.
+    if (deal.terms?.booking) return;
     const dec = await sql`
       update public.listings set stock = stock - ${deal.qty}
       where id = ${deal.listing_id} and stock >= ${deal.qty} and lane <> 'services'

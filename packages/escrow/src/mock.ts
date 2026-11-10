@@ -27,8 +27,8 @@ export class MockEscrowProvider implements EscrowProvider {
   async payoutToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string; part?: number }): Promise<EscrowTxn> {
     return { providerRef: this.ref("pay", p.dealId, p.part), dealId: p.dealId, amountKobo: p.amountKobo, status: "released" };
   }
-  async refundToBuyer(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn> {
-    return { providerRef: this.ref("ref", p.dealId), dealId: p.dealId, amountKobo: p.amountKobo, status: "refunded" };
+  async refundToBuyer(p: { dealId: string; amountKobo: number; idempotencyKey: string; part?: number }): Promise<EscrowTxn> {
+    return { providerRef: this.ref("ref", p.dealId, p.part), dealId: p.dealId, amountKobo: p.amountKobo, status: "refunded" };
   }
   async getTransaction(): Promise<EscrowTxn | null> {
     return null; // mock keeps no store; reconciliation is a no-op here
