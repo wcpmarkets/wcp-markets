@@ -85,6 +85,14 @@ export const handler = async () => {
     console.error("[sweeper] expireStaleCheckouts failed:", e);
   }
 
+  // AI search cache (3I): readings are only served for 7 days; keep a little past that.
+  try {
+    await db`delete from public.search_interpretations where created_at < now() - interval '14 days'`;
+  } catch (e) {
+    // Before migration 0031 the table doesn't exist; not worth failing the run over.
+    console.warn("[sweeper] search cache prune skipped:", e instanceof Error ? e.message : e);
+  }
+
   console.log(
     `[sweeper] checkouts confirmed=${checkouts.confirmed} abandoned=${checkouts.abandoned}; recoveries completed=${recov.completed} failed=${recov.failed}; deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
       `skipped=${timers?.skipped ?? "?"} errored=${timers?.errored ?? "?"}; ` +

@@ -96,6 +96,12 @@ resource "aws_lambda_function" "api" {
       PAYSTACK_SECRET_KEY_SSM = "/wcp/api/paystack-secret-key"
       # Paystack's checkout returns the browser here (/payments/paystack/return).
       PUBLIC_API_URL = aws_apigatewayv2_api.http.api_endpoint
+      # Phase 3 I. Anthropic key for AI search. Until the parameter exists, search runs
+      # on the keyword interpreter and photo search answers 503; creating it needs
+      # only a cold start. Model and daily call cap are tunable here.
+      ANTHROPIC_API_KEY_SSM = "/wcp/api/anthropic-api-key"
+      SEARCH_AI_MODEL       = "claude-opus-5-5"
+      SEARCH_AI_DAILY_CAP   = "3000"
     }
   }
 

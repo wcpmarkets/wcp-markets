@@ -19,6 +19,7 @@ import { registerAttachments } from "./routes/attachments.js";
 import { registerRecovery } from "./routes/recovery.js";
 import { registerSessions } from "./routes/sessions.js";
 import { registerPayoutAccounts } from "./routes/payout-accounts.js";
+import { registerSearch } from "./routes/search.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -68,6 +69,8 @@ export function createApp() {
   // ── Property shortlets: dated bookings into escrow (Phase 3 E) ─────────────
   registerBookings(app);
   registerAttachments(app);
+  // ── AI search: interpret, photo, zero-results suggestions (Phase 3 I) ──────
+  registerSearch(app);
 
   // ── POST /auth/otp/request ──────────────────────────────────────────────────
   // Throttled OTP request. Rate-limiting lives HERE (per-phone + per-IP) so a bare

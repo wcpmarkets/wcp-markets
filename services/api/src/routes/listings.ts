@@ -29,7 +29,7 @@ import { UserSummarySchema, userSummaries, type UserSummary } from "../profiles/
  * `category` stay separate; M1 is Goods-only (the DB CHECKs lane='goods').
  */
 
-const CONDITIONS = ["new", "used", "refurbished"] as const;
+export const CONDITIONS = ["new", "used", "refurbished"] as const;
 /** Statuses a seller may set. */
 const SELLER_STATUSES = ["draft", "active", "sold", "archived"] as const;
 /**
@@ -39,9 +39,9 @@ const SELLER_STATUSES = ["draft", "active", "sold", "archived"] as const;
  */
 const STATUSES = [...SELLER_STATUSES, "under_review", "removed"] as const;
 const MODERATED: readonly string[] = ["under_review", "removed"];
-const LANES = ["goods", "property", "vehicles", "services"] as const;
-const PROPERTY_TYPES = ["apartment", "house", "land", "commercial", "shop", "office"] as const;
-const DEAL_TYPES = ["rent", "sale", "shortlet"] as const;
+export const LANES = ["goods", "property", "vehicles", "services"] as const;
+export const PROPERTY_TYPES = ["apartment", "house", "land", "commercial", "shop", "office"] as const;
+export const DEAL_TYPES = ["rent", "sale", "shortlet"] as const;
 const IMAGE_TYPES = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -388,6 +388,73 @@ function locationWhere(
   return db`state = ${q.state} and city = ${q.city}`;
 }
 
+/** Every filter /listings/search understands (the AI search routes reuse it to count). */
+export type SearchParams = {
+  q?: string;
+  lane?: (typeof LANES)[number];
+  category?: string;
+  condition?: (typeof CONDITIONS)[number];
+  minPrice?: number;
+  maxPrice?: number;
+  location?: string;
+  state?: string;
+  city?: string;
+  nearLat?: number;
+  nearLng?: number;
+  radiusKm?: number;
+  make?: string;
+  model?: string;
+  minYear?: number;
+  maxYear?: number;
+  maxMileageKm?: number;
+  transmission?: (typeof TRANSMISSIONS)[number];
+  fuel?: (typeof FUELS)[number];
+  body?: (typeof BODIES)[number];
+  vehicleCondition?: (typeof VEHICLE_CONDITIONS)[number];
+  registration?: (typeof REGISTRATIONS)[number];
+  serviceType?: string;
+  availability?: (typeof AVAILABILITY)[number];
+  propertyType?: (typeof PROPERTY_TYPES)[number];
+  dealType?: (typeof DEAL_TYPES)[number];
+  minBeds?: number;
+};
+
+/** The WHERE for a search: active listings narrowed by every filter that's set. */
+export function searchWhere(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, p: SearchParams) {
+  const place = locationWhere(db, p);
+  // Compose the WHERE by nesting postgres.js fragments (all values bound).
+  let where = db`status = 'active'`;
+  if (p.lane) where = db`${where} and lane = ${p.lane}`;
+  if (p.category) where = db`${where} and category = ${p.category}`;
+  if (p.condition) where = db`${where} and condition = ${p.condition}`;
+  if (p.minPrice != null) where = db`${where} and price_kobo >= ${p.minPrice}`;
+  if (p.maxPrice != null) where = db`${where} and price_kobo <= ${p.maxPrice}`;
+  if (p.location) where = db`${where} and location ilike ${"%" + p.location + "%"}`;
+  if (place) where = db`${where} and (${place})`;
+  // Vehicle facets live in attributes; each filter narrows to cars that carry it.
+  if (p.make) where = db`${where} and attributes->>'make' = ${p.make}`;
+  if (p.model) where = db`${where} and lower(attributes->>'model') = lower(${p.model})`;
+  if (p.minYear != null) where = db`${where} and (attributes->>'year')::int >= ${p.minYear}`;
+  if (p.maxYear != null) where = db`${where} and (attributes->>'year')::int <= ${p.maxYear}`;
+  if (p.maxMileageKm != null) where = db`${where} and (attributes->>'mileageKm')::int <= ${p.maxMileageKm}`;
+  if (p.transmission) where = db`${where} and attributes->>'transmission' = ${p.transmission}`;
+  if (p.fuel) where = db`${where} and attributes->>'fuel' = ${p.fuel}`;
+  if (p.body) where = db`${where} and attributes->>'body' = ${p.body}`;
+  if (p.vehicleCondition) where = db`${where} and attributes->>'vehicleCondition' = ${p.vehicleCondition}`;
+  if (p.registration) where = db`${where} and attributes->>'registration' = ${p.registration}`;
+  if (p.serviceType) where = db`${where} and attributes->>'serviceType' = ${p.serviceType}`;
+  if (p.availability) where = db`${where} and attributes->'availability' ? ${p.availability}`;
+  if (p.propertyType) where = db`${where} and attributes->>'propertyType' = ${p.propertyType}`;
+  if (p.dealType) where = db`${where} and attributes->>'dealType' = ${p.dealType}`;
+  if (p.minBeds != null) where = db`${where} and (attributes->>'beds')::int >= ${p.minBeds}`;
+  if (p.q)
+    // FTS match OR a fuzzy word-similarity match on the title (typo tolerance;
+    // word_similarity finds the best-matching word within the title, so a long
+    // title still matches a single mistyped term).
+    where = db`${where} and (search_vector @@ websearch_to_tsquery('english', ${p.q}) or word_similarity(${p.q}, title) > 0.25)`;
+  return where;
+}
+
 export function registerListings(app: OpenAPIHono<AuthEnv>) {
   // ── POST /listings ─────────────────────────────────────────────────────────
   app.openapi(
@@ -561,6 +628,10 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           // Services (22c browse): the type within a group, and availability flags.
           serviceType: z.string().max(60).optional(),
           availability: z.enum(AVAILABILITY).optional(),
+          // Property (13e-filters): what it is, rent / sale / shortlet, and a bedroom floor.
+          propertyType: z.enum(PROPERTY_TYPES).optional(),
+          dealType: z.enum(DEAL_TYPES).optional(),
+          minBeds: z.coerce.number().int().min(0).max(50).optional(),
           /** relevance (default; newest when there's no query), price, newest, or lowest mileage. */
           sort: z.enum(["relevance", "price_asc", "price_desc", "newest", "mileage_asc"]).optional(),
           limit: z.coerce.number().int().min(1).max(50).optional(),
@@ -581,42 +652,11 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
     async (c) => {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
-      const {
-        q, lane, category, condition, minPrice, maxPrice, location,
-        make, model, minYear, maxYear: maxYr, maxMileageKm, transmission, fuel, body,
-        vehicleCondition, registration, serviceType, availability, sort, ...rest
-      } = c.req.valid("query");
-      const limit = c.req.valid("query").limit ?? 20;
-      const offset = c.req.valid("query").offset ?? 0;
-      const place = locationWhere(db, rest);
-
-      // Compose the WHERE by nesting postgres.js fragments (all values bound).
-      let where = db`status = 'active'`;
-      if (lane) where = db`${where} and lane = ${lane}`;
-      if (category) where = db`${where} and category = ${category}`;
-      if (condition) where = db`${where} and condition = ${condition}`;
-      if (minPrice != null) where = db`${where} and price_kobo >= ${minPrice}`;
-      if (maxPrice != null) where = db`${where} and price_kobo <= ${maxPrice}`;
-      if (location) where = db`${where} and location ilike ${"%" + location + "%"}`;
-      if (place) where = db`${where} and (${place})`;
-      // Vehicle facets live in attributes; each filter narrows to cars that carry it.
-      if (make) where = db`${where} and attributes->>'make' = ${make}`;
-      if (model) where = db`${where} and lower(attributes->>'model') = lower(${model})`;
-      if (minYear != null) where = db`${where} and (attributes->>'year')::int >= ${minYear}`;
-      if (maxYr != null) where = db`${where} and (attributes->>'year')::int <= ${maxYr}`;
-      if (maxMileageKm != null) where = db`${where} and (attributes->>'mileageKm')::int <= ${maxMileageKm}`;
-      if (transmission) where = db`${where} and attributes->>'transmission' = ${transmission}`;
-      if (fuel) where = db`${where} and attributes->>'fuel' = ${fuel}`;
-      if (body) where = db`${where} and attributes->>'body' = ${body}`;
-      if (vehicleCondition) where = db`${where} and attributes->>'vehicleCondition' = ${vehicleCondition}`;
-      if (registration) where = db`${where} and attributes->>'registration' = ${registration}`;
-      if (serviceType) where = db`${where} and attributes->>'serviceType' = ${serviceType}`;
-      if (availability) where = db`${where} and attributes->'availability' ? ${availability}`;
-      if (q)
-        // FTS match OR a fuzzy word-similarity match on the title (typo tolerance;
-        // word_similarity finds the best-matching word within the title, so a long
-        // title still matches a single mistyped term).
-        where = db`${where} and (search_vector @@ websearch_to_tsquery('english', ${q}) or word_similarity(${q}, title) > 0.25)`;
+      const params = c.req.valid("query");
+      const { q, sort } = params;
+      const limit = params.limit ?? 20;
+      const offset = params.offset ?? 0;
+      const where = searchWhere(db, params);
 
       // Rank by FTS relevance, then fuzzy closeness; else newest first — unless the
       // caller asked for an explicit sort (13e filter sheet).

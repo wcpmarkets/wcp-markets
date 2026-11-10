@@ -1798,6 +1798,391 @@
           "contentType"
         ]
       },
+      "SearchFilters": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string",
+            "enum": [
+              "new",
+              "used",
+              "refurbished"
+            ]
+          },
+          "minPrice": {
+            "type": "integer",
+            "description": "kobo"
+          },
+          "maxPrice": {
+            "type": "integer",
+            "description": "kobo"
+          },
+          "state": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "propertyType": {
+            "type": "string",
+            "enum": [
+              "apartment",
+              "house",
+              "land",
+              "commercial",
+              "shop",
+              "office"
+            ]
+          },
+          "dealType": {
+            "type": "string",
+            "enum": [
+              "rent",
+              "sale",
+              "shortlet"
+            ]
+          },
+          "minBeds": {
+            "type": "integer"
+          },
+          "make": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "minYear": {
+            "type": "integer"
+          },
+          "maxYear": {
+            "type": "integer"
+          },
+          "maxMileageKm": {
+            "type": "integer"
+          },
+          "transmission": {
+            "type": "string",
+            "enum": [
+              "automatic",
+              "manual"
+            ]
+          },
+          "fuel": {
+            "type": "string",
+            "enum": [
+              "petrol",
+              "diesel",
+              "hybrid",
+              "electric"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "enum": [
+              "saloon",
+              "suv",
+              "hatchback",
+              "bus",
+              "pickup",
+              "coupe",
+              "minivan",
+              "truck"
+            ]
+          },
+          "vehicleCondition": {
+            "type": "string",
+            "enum": [
+              "brand_new",
+              "foreign_used",
+              "nigerian_used"
+            ]
+          },
+          "registration": {
+            "type": "string",
+            "enum": [
+              "registered",
+              "unregistered",
+              "custom_papers"
+            ]
+          },
+          "serviceType": {
+            "type": "string"
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "today",
+              "this_week",
+              "emergency"
+            ]
+          }
+        }
+      },
+      "SearchAlternative": {
+        "type": "object",
+        "properties": {
+          "lane": {
+            "type": "string",
+            "enum": [
+              "goods",
+              "property",
+              "vehicles",
+              "services"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "keywords": {
+            "type": "string"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/SearchFilters"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "fromKobo": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        },
+        "required": [
+          "lane",
+          "label",
+          "keywords",
+          "filters"
+        ]
+      },
+      "SearchInterpretation": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "ai",
+              "rules"
+            ]
+          },
+          "lane": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "goods",
+              "property",
+              "vehicles",
+              "services"
+            ]
+          },
+          "keywords": {
+            "type": "string"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/SearchFilters"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Banner sentence; **…** marks the bold span."
+          },
+          "tossUp": {
+            "type": "boolean"
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchAlternative"
+            }
+          },
+          "itemName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "lane",
+          "keywords",
+          "filters",
+          "summary",
+          "tossUp",
+          "alternatives"
+        ]
+      },
+      "SearchInterpretRequest": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "lane": {
+            "type": "string",
+            "enum": [
+              "goods",
+              "property",
+              "vehicles",
+              "services"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "nearLat": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "nearLng": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "radiusKm": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "q"
+        ]
+      },
+      "PhotoSearchRequest": {
+        "type": "object",
+        "properties": {
+          "imageBase64": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 2000000
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp"
+            ]
+          },
+          "lane": {
+            "type": "string",
+            "enum": [
+              "goods",
+              "property",
+              "vehicles",
+              "services"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "nearLat": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "nearLng": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "radiusKm": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "imageBase64",
+          "mediaType"
+        ]
+      },
+      "SearchSuggestions": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchAlternative"
+            }
+          }
+        },
+        "required": [
+          "message",
+          "suggestions"
+        ]
+      },
+      "SearchSuggestRequest": {
+        "type": "object",
+        "properties": {
+          "lane": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "goods",
+              "property",
+              "vehicles",
+              "services"
+            ]
+          },
+          "keywords": {
+            "type": "string",
+            "maxLength": 120,
+            "default": ""
+          },
+          "filters": {
+            "$ref": "#/components/schemas/SearchFilters"
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "nearLat": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "nearLng": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "radiusKm": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "filters"
+        ]
+      },
       "OtpRequested": {
         "type": "object",
         "properties": {
@@ -6177,6 +6562,137 @@
         }
       }
     },
+    "/search/interpret": {
+      "post": {
+        "summary": "Read a typed search into a lane, filters and keywords (13e / 22e / 22f)",
+        "tags": [
+          "search"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchInterpretRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The interpretation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchInterpretation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/photo": {
+      "post": {
+        "summary": "Identify a photographed item and read it into a search (13e-photo)",
+        "description": "The photo is sent to the AI provider to identify the item, and is not stored.",
+        "tags": [
+          "search"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhotoSearchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The interpretation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchInterpretation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Photo search isn't available (no AI configured, budget spent, or it couldn't tell)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/suggest": {
+      "post": {
+        "summary": "For a search with no results: the nearest searches that do have some (21a)",
+        "tags": [
+          "search"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchSuggestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Suggestions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchSuggestions"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/otp/request": {
       "post": {
         "summary": "Request a phone OTP (rate-limited)",
@@ -6693,6 +7209,48 @@
             },
             "required": false,
             "name": "availability",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "apartment",
+                "house",
+                "land",
+                "commercial",
+                "shop",
+                "office"
+              ]
+            },
+            "required": false,
+            "name": "propertyType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "rent",
+                "sale",
+                "shortlet"
+              ]
+            },
+            "required": false,
+            "name": "dealType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 50
+            },
+            "required": false,
+            "name": "minBeds",
             "in": "query"
           },
           {

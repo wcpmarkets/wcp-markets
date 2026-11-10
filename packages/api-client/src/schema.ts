@@ -2401,6 +2401,165 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/search/interpret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Read a typed search into a lane, filters and keywords (13e / 22e / 22f) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SearchInterpretRequest"];
+                };
+            };
+            responses: {
+                /** @description The interpretation */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchInterpretation"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search/photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Identify a photographed item and read it into a search (13e-photo)
+         * @description The photo is sent to the AI provider to identify the item, and is not stored.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PhotoSearchRequest"];
+                };
+            };
+            responses: {
+                /** @description The interpretation */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchInterpretation"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Photo search isn't available (no AI configured, budget spent, or it couldn't tell) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** For a search with no results: the nearest searches that do have some (21a) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SearchSuggestRequest"];
+                };
+            };
+            responses: {
+                /** @description Suggestions */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchSuggestions"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/otp/request": {
         parameters: {
             query?: never;
@@ -2606,6 +2765,9 @@ export interface paths {
                     registration?: "registered" | "unregistered" | "custom_papers";
                     serviceType?: string;
                     availability?: "today" | "this_week" | "emergency";
+                    propertyType?: "apartment" | "house" | "land" | "commercial" | "shop" | "office";
+                    dealType?: "rent" | "sale" | "shortlet";
+                    minBeds?: number | null;
                     sort?: "relevance" | "price_asc" | "price_desc" | "newest" | "mileage_asc";
                     limit?: number;
                     offset?: number | null;
@@ -5952,6 +6114,101 @@ export interface components {
         AttachmentUploadRequest: {
             /** @enum {string} */
             contentType: "image/jpeg" | "image/png" | "image/webp";
+        };
+        SearchFilters: {
+            category?: string;
+            /** @enum {string} */
+            condition?: "new" | "used" | "refurbished";
+            /** @description kobo */
+            minPrice?: number;
+            /** @description kobo */
+            maxPrice?: number;
+            state?: string;
+            city?: string;
+            /** @enum {string} */
+            propertyType?: "apartment" | "house" | "land" | "commercial" | "shop" | "office";
+            /** @enum {string} */
+            dealType?: "rent" | "sale" | "shortlet";
+            minBeds?: number;
+            make?: string;
+            model?: string;
+            minYear?: number;
+            maxYear?: number;
+            maxMileageKm?: number;
+            /** @enum {string} */
+            transmission?: "automatic" | "manual";
+            /** @enum {string} */
+            fuel?: "petrol" | "diesel" | "hybrid" | "electric";
+            /** @enum {string} */
+            body?: "saloon" | "suv" | "hatchback" | "bus" | "pickup" | "coupe" | "minivan" | "truck";
+            /** @enum {string} */
+            vehicleCondition?: "brand_new" | "foreign_used" | "nigerian_used";
+            /** @enum {string} */
+            registration?: "registered" | "unregistered" | "custom_papers";
+            serviceType?: string;
+            /** @enum {string} */
+            availability?: "today" | "this_week" | "emergency";
+        };
+        SearchAlternative: {
+            /** @enum {string} */
+            lane: "goods" | "property" | "vehicles" | "services";
+            label: string;
+            keywords: string;
+            filters: components["schemas"]["SearchFilters"];
+            count?: number;
+            /** Format: int64 */
+            fromKobo?: number | null;
+        };
+        SearchInterpretation: {
+            /** @enum {string} */
+            source: "ai" | "rules";
+            /** @enum {string|null} */
+            lane: "goods" | "property" | "vehicles" | "services" | null;
+            keywords: string;
+            filters: components["schemas"]["SearchFilters"];
+            /** @description Banner sentence; **…** marks the bold span. */
+            summary: string;
+            tossUp: boolean;
+            alternatives: components["schemas"]["SearchAlternative"][];
+            itemName?: string;
+        };
+        SearchInterpretRequest: {
+            q: string;
+            /** @enum {string} */
+            lane?: "goods" | "property" | "vehicles" | "services";
+            state?: string;
+            city?: string;
+            nearLat?: number;
+            nearLng?: number;
+            radiusKm?: number;
+        };
+        PhotoSearchRequest: {
+            imageBase64: string;
+            /** @enum {string} */
+            mediaType: "image/jpeg" | "image/png" | "image/webp";
+            /** @enum {string} */
+            lane?: "goods" | "property" | "vehicles" | "services";
+            state?: string;
+            city?: string;
+            nearLat?: number;
+            nearLng?: number;
+            radiusKm?: number;
+        };
+        SearchSuggestions: {
+            message: string;
+            suggestions: components["schemas"]["SearchAlternative"][];
+        };
+        SearchSuggestRequest: {
+            /** @enum {string|null} */
+            lane?: "goods" | "property" | "vehicles" | "services" | null;
+            /** @default  */
+            keywords: string;
+            filters: components["schemas"]["SearchFilters"];
+            state?: string;
+            city?: string;
+            nearLat?: number;
+            nearLng?: number;
+            radiusKm?: number;
         };
         OtpRequested: {
             /** @enum {string} */
