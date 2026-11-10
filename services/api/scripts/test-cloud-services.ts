@@ -80,7 +80,7 @@ async function main() {
   const post = (body: unknown) => api("/listings", pro.token, { method: "POST", body: JSON.stringify(body) });
   const deadline = async (dealId: string) =>
     (await sql<{ hours: number; action: string }[]>`
-      select extract(epoch from (due_at - now())) / 3600 as hours, action
+      select (extract(epoch from (due_at - now())) / 3600)::float8 as hours, action
       from public.deal_deadlines where deal_id = ${dealId}`)[0];
   try {
     // ── Catalogue ─────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ async function main() {
     check("post a service → 201", r1.status === 201, `${r1.status}`);
     check("price is the cheapest 'from' line (₦8,000), one unit", L.priceKobo === 8_000_00 && L.stock === 1, `${L.priceKobo} ${L.stock}`);
     check("rate card round-trips, 'Quote' line has no price", Array.isArray(L.attributes.rateCard) && (L.attributes.rateCard as { fromKobo?: number }[])[2]!.fromKobo == null);
-    const allQuote = await j<Listing>(await post(svc({ title: "Quote-only test" }, { rateCard: [{ name: "Site survey" }], coverageKm: undefined, coverageAnywhere: true })));
+    const allQuote = await j<Listing>(await post(svc({ title: "Quote-only test" }, { rateCard: [{ name: "Site survey" }], coverageKm: undefined, coverageAnywhere: true, availability: ["this_week"] })));
     check("all-quote rate card → price 0, anywhere coverage ok", allQuote.priceKobo === 0 && allQuote.attributes.coverageAnywhere === true);
     const noCov = await post(svc({}, { coverageKm: 7 }));
     check("coverage not 2/5/10 and not anywhere → 422", noCov.status === 422 && (await err(noCov)) === "service_needs_coverage");
