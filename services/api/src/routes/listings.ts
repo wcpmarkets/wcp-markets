@@ -65,6 +65,9 @@ const RateItemSchema = z
   })
   .openapi("RateItem");
 
+/** Shortlet / rental amenities, as the 13g-shortlet chips name them. */
+export const AMENITIES = ["power", "water", "wifi", "ac", "security", "parking", "kitchen", "pool"] as const;
+
 const ListingAttributesSchema = z
   .object({
     propertyType: z.enum(PROPERTY_TYPES).optional(),
@@ -78,6 +81,8 @@ const ListingAttributesSchema = z
     maxGuests: z.number().int().min(1).max(20).optional(),
     cleaningKobo: z.number().int().min(0).optional(),
     cautionKobo: z.number().int().min(0).optional(),
+    // What the place has (13g-shortlet AMENITIES chips); buyers can see them on the listing.
+    amenities: z.array(z.enum(AMENITIES)).max(AMENITIES.length).optional(),
     make: z.string().trim().min(1).max(40).optional(),
     model: z.string().trim().min(1).max(40).optional(),
     year: z.number().int().optional(),

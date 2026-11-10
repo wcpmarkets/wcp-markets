@@ -49,8 +49,10 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     from public.ledger_entries le
     join public.deals d on d.id = le.deal_id
     left join lateral (
+      -- Stages that have left escrow either way: released to the seller/host, or
+      -- returned to the buyer while the deal lived on (a deposit, a cancelled stay).
       select coalesce(sum(m.amount_kobo), 0) as released
-      from public.deal_milestones m where m.deal_id = d.id and m.status = 'released'
+      from public.deal_milestones m where m.deal_id = d.id and m.status in ('released', 'refunded')
     ) st on true
     where le.account = 'escrow_holding'
     group by le.deal_id, d.price_kobo, d.state, st.released
@@ -60,7 +62,7 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     select le.deal_id, sum(le.amount_kobo)::bigint as esc, d.state
     from public.ledger_entries le
     join public.deals d on d.id = le.deal_id
-    where le.account = 'escrow_holding' and d.state in ('COMPLETED', 'REFUNDED')
+    where le.account = 'escrow_holding' and d.state in ('COMPLETED', 'REFUNDED', 'CANCELLED')
     group by le.deal_id, d.state, d.updated_at
     having sum(le.amount_kobo) <> 0 and d.updated_at < now() - make_interval(mins => ${SETTLEMENT_GRACE_MINS})
   `;

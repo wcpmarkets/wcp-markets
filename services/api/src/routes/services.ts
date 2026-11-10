@@ -1,4 +1,6 @@
 import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { ownedPaths, PhotoPathsSchema } from "./attachments.js";
+import { ATTACHMENTS_BUCKET, createSignedDownloadUrls } from "../supabase.js";
 import { auth, type AuthEnv } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rate-limit.js";
 import { getDb } from "../db.js";
@@ -55,6 +57,8 @@ const QuoteRequestSchema = z
     quotedKobo: z.number().int().nullable(),
     startsAt: z.string().nullable(),
     createdAt: z.string(),
+    /** Signed (1h) URLs of photos the buyer attached ("here's the leak"). */
+    photoUrls: z.array(z.string()),
   })
   .openapi("QuoteRequest");
 
@@ -69,6 +73,8 @@ const QuoteRequestCreateSchema = z
     location: z.string().trim().max(120).optional(),
     /** Free text: "Sat AM", "today if possible". */
     preferred: z.string().trim().max(80).optional(),
+    /** Photos of the job (POST /attachments first), up to 4. */
+    photoPaths: PhotoPathsSchema.optional(),
   })
   .openapi("QuoteRequestCreate");
 
@@ -123,6 +129,7 @@ type ReqRow = {
   deal_state: string | null;
   deal_price: string | number | null;
   deal_starts: string | null;
+  photo_paths: string[] | null;
   created_at: string | Date;
 };
 
@@ -132,7 +139,7 @@ const iso = (v: string | Date): string => new Date(v).toISOString();
 function reqQuery(db: Sql) {
   return db`
     select q.id, q.conversation_id, q.listing_id, l.title, q.buyer_id, q.seller_id, q.service,
-      q.description, q.location, q.state, q.city, q.preferred, q.status, q.created_at,
+      q.description, q.location, q.state, q.city, q.preferred, q.status, q.created_at, q.photo_paths,
       d.id as deal_id, d.state as deal_state, d.price_kobo as deal_price,
       d.terms->>'startsAt' as deal_starts
     from public.quote_requests q
@@ -143,7 +150,12 @@ function reqQuery(db: Sql) {
 
 async function toRequests(db: Sql, rows: ReqRow[]) {
   const people = await userSummaries(db, rows.flatMap((r) => [r.buyer_id, r.seller_id]));
+  // One batch sign for every photo on the page, not a request per photo.
+  const allPaths = rows.flatMap((r) => r.photo_paths ?? []);
+  const signed = await createSignedDownloadUrls(ATTACHMENTS_BUCKET, allPaths);
+  const urlOf = new Map(allPaths.map((p, i) => [p, signed[i]]));
   return rows.map((r) => ({
+    photoUrls: (r.photo_paths ?? []).map((p) => urlOf.get(p)).filter((u): u is string => u != null),
     id: r.id,
     conversationId: r.conversation_id,
     listingId: r.listing_id,
@@ -230,7 +242,7 @@ export function registerServices(app: OpenAPIHono<AuthEnv>) {
           description: "Not a live services listing, or a quote is live in this thread (quote_live)",
           content: { "application/json": { schema: ErrorSchema } },
         },
-        422: { description: "Unknown area", content: { "application/json": { schema: ErrorSchema } } },
+        422: { description: "Unknown area, or a photo that isn't yours (bad_photo)", content: { "application/json": { schema: ErrorSchema } } },
         429: { description: "Rate limited", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
@@ -252,6 +264,8 @@ export function registerServices(app: OpenAPIHono<AuthEnv>) {
       if (listing.seller_id === user.sub) return c.json({ error: "own_listing" }, 400);
       if (await isBlockedEitherWay(db, user.sub, listing.seller_id)) return c.json({ error: "blocked" }, 403);
 
+      const photos = ownedPaths(user.sub, b.photoPaths);
+      if (!photos) return c.json({ error: "bad_photo" }, 422);
       const result = await db.begin(async (tx) => {
         const t = tx as unknown as Sql;
         await t`
@@ -277,9 +291,9 @@ export function registerServices(app: OpenAPIHono<AuthEnv>) {
         `;
         const [row] = await t<{ id: string }[]>`
           insert into public.quote_requests
-            (conversation_id, listing_id, buyer_id, seller_id, service, description, location, state, city, preferred)
+            (conversation_id, listing_id, buyer_id, seller_id, service, description, location, state, city, preferred, photo_paths)
           values (${conv!.id}, ${id}, ${user.sub}, ${listing.seller_id}, ${b.service}, ${b.description},
-                  ${b.location ?? null}, ${b.state ?? null}, ${b.city ?? null}, ${b.preferred ?? null})
+                  ${b.location ?? null}, ${b.state ?? null}, ${b.city ?? null}, ${b.preferred ?? null}, ${photos})
           returning id
         `;
         await t`update public.conversations set last_message_at = now() where id = ${conv!.id}`;

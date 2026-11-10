@@ -8,7 +8,7 @@ import {
   nextState,
 } from "./machine.js";
 import { EFFECTS } from "./effects.js";
-import type { StagePlan } from "./stages.js";
+import { bookingPlan, type StagePlan } from "./stages.js";
 
 /**
  * The deal command handler — the deterministic transactional core. Every command
@@ -296,12 +296,17 @@ function bookingRefuses(deal: DealRow, action: DealAction): boolean {
   if (deal.terms?.booking) {
     if (action === "hand_off" || action === "confirm_receipt") return true;
     if (action === "dispute" && deal.state === "HANDED_OFF") return true;
+    // Cancelling is for before the stay; once check-in time passes, a problem with
+    // the place is a dispute (frozen funds, an admin decides), not a cancellation.
+    if (action === "cancel_booking" && Date.now() >= checkInAt(deal.terms.booking.checkIn).getTime()) return true;
     return false;
   }
-  return action === "check_out" || action === "claim_deposit" || action === "return_deposit";
+  return action === "check_out" || action === "claim_deposit" || action === "return_deposit" || action === "cancel_booking";
 }
 
 const DAY_MS = 86_400_000;
+/** Unpaid booking holds one guest may have at one listing (each lapses after 4h). */
+const MAX_UNPAID_HOLDS = 2;
 const nightsBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / DAY_MS);
 
 /**
@@ -328,12 +333,14 @@ export async function createBooking(
     if (nights < minNights) return { ok: false, code: "min_nights", minNights };
     if (a.maxGuests != null && p.guests > a.maxGuests) return { ok: false, code: "too_many_guests" };
 
-    const [active] = await sql`
-      select 1 from public.deals
-      where listing_id = ${p.listingId} and buyer_id = ${p.buyerId} and state <> all (public.deal_terminal_states())
-      limit 1
+    // A guest may hold several stays at one place (different dates never clash — the
+    // exclusion constraint sees to that), but not squat its calendar: unpaid holds
+    // are capped, and each lapses after 4h anyway.
+    const [unpaid] = await sql<{ n: number }[]>`
+      select count(*)::int as n from public.deals
+      where listing_id = ${p.listingId} and buyer_id = ${p.buyerId} and state in ('ACCEPTED', 'PAYMENT_PENDING')
     `;
-    if (active) return { ok: false, code: "deal_active" };
+    if (unpaid!.n >= MAX_UNPAID_HOLDS) return { ok: false, code: "deal_active" };
     // Under the listing lock, so no concurrent booking can slip in between this check
     // and the insert; the exclusion constraint still guards the table itself.
     const [clash] = await sql`
@@ -347,16 +354,9 @@ export async function createBooking(
     const nightlyKobo = Number(listing.price_kobo);
     const cleaningKobo = a.cleaningKobo ?? 0;
     const cautionKobo = a.cautionKobo ?? 0;
-    const stayKobo = nightlyKobo * nights + cleaningKobo;
-    const priceKobo = stayKobo + cautionKobo;
-    const terms: DealTerms = {
-      service: listing.title,
-      booking: { checkIn: p.checkIn, checkOut: p.checkOut, guests: p.guests, nights, nightlyKobo, cleaningKobo, cautionKobo },
-      milestones: [
-        { title: "Stay", amountKobo: stayKobo },
-        ...(cautionKobo > 0 ? [{ title: "Caution deposit", amountKobo: cautionKobo }] : []),
-      ],
-    };
+    const priceKobo = nightlyKobo * nights + cleaningKobo + cautionKobo;
+    const booking: BookingTerms = { checkIn: p.checkIn, checkOut: p.checkOut, guests: p.guests, nights, nightlyKobo, cleaningKobo, cautionKobo };
+    const terms: DealTerms = { service: listing.title, booking, milestones: bookingPlan(booking) };
 
     const [deal] = await sql<DealRow[]>`
       insert into public.deals (listing_id, buyer_id, seller_id, state, price_kobo, qty, terms)

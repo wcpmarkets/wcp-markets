@@ -11,7 +11,7 @@
  * one row appended to `deal_events`; `deals.state` is written in the SAME tx as the
  * event (event-sourcing-lite — the log is the audit trail, the column is the fold).
  *
- * States are kept deliberately LEAN (13): each state is a row, a test, and UI in
+ * States are kept deliberately LEAN (15): each state is a row, a test, and UI in
  * every client, so anything that is really a flag/timestamp on another state was
  * audited out (e.g. WHY a deal expired lives on the terminating event, not in a
  * separate state).
@@ -39,6 +39,7 @@ export const DEAL_STATES = [
   "EXPIRED", // a deadline lapsed (reason is on the event)
   "COMPLETED", // released to seller (happy path)
   "REFUNDED", // returned to buyer (dispute / oversold / seller-cancel)
+  "CANCELLED", // a guest cancelled a paid shortlet: split by notice (host share released, the rest returned)
 ] as const;
 export type DealState = (typeof DEAL_STATES)[number];
 
@@ -48,6 +49,7 @@ export const TERMINAL_STATES = [
   "EXPIRED",
   "COMPLETED",
   "REFUNDED",
+  "CANCELLED",
 ] as const satisfies readonly DealState[];
 
 // ADMIN is distinct from SYSTEM so the audit log records WHICH human resolved a
@@ -74,6 +76,7 @@ export const DEAL_ACTIONS = [
   "release_stage", // a staged job: one stage released, more still held (redirected to by confirm/auto_release)
   "check_out", // a shortlet's checkout time: the stay releases to the host, the deposit stays held
   "claim_deposit", // a host claims a shortlet's caution deposit for damage (→ an admin decides)
+  "cancel_booking", // a guest cancels a paid shortlet before check-in (tiered by notice → CANCELLED)
   "return_deposit", // an admin rejects a deposit claim: the deposit goes back, the stay stands (redirected to by resolve_refund)
   "dispute",
   "respond", // seller responds to a dispute (stops the 24h clock; → awaiting admin)
@@ -149,6 +152,10 @@ export const TRANSITIONS: readonly Transition[] = [
   // claim the deposit, which waits on an admin like a responded dispute.
   { from: "PAID_IN_ESCROW", actor: "SYSTEM", action: "check_out", to: "HANDED_OFF", milestone: "M5" },
   { from: "HANDED_OFF", actor: "SELLER", action: "claim_deposit", to: "DISPUTED_RESPONDED", milestone: "M6" },
+  // A guest cancelling before check-in: the notice given decides the split (effects.ts
+  // cancelBooking) — the host keeps 0, 50% or 100% of the nightly total; cleaning and
+  // the deposit always go back; WCP keeps the buyer fee (the escrow service was used).
+  { from: "PAID_IN_ESCROW", actor: "BUYER", action: "cancel_booking", to: "CANCELLED", milestone: "M5" },
 
   // ── Disputes (M6) ─────────────────────────────────────────────────────────
   { from: "PAID_IN_ESCROW", actor: "BUYER", action: "dispute", to: "DISPUTED", milestone: "M6" },

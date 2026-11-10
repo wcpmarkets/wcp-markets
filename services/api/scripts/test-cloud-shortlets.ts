@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import postgres from "postgres";
 import { fetchSsm } from "../src/secrets.js";
-import { buyerFeeKobo, sellerFeeKobo } from "../src/money/fees.js";
+import { buyerFeeKobo, sellerFeeKobo, stageSellerFees } from "../src/money/fees.js";
 import { reconcile } from "../src/money/reconcile.js";
 
 /**
@@ -18,6 +18,11 @@ import { reconcile } from "../src/money/reconcile.js";
  *   • a host's deposit claim freezes it for an admin: upheld → the host keeps it;
  *     rejected → it goes back and the booking still COMPLETES
  *   • a problem reported during the stay refunds everything and frees the dates
+ *   • (3F) a guest may cancel a paid stay before check-in, tiered by notice: 7+ days →
+ *     all back; 2–7 days → host keeps half the nights; under 48h → host keeps the
+ *     nights. Cleaning + deposit always back; WCP keeps the buyer fee; dates freed
+ *   • (3F) one guest can hold several stays at one place (unpaid holds capped at 2);
+ *     amenities are stored; a deposit claim carries photos the admin can see
  *   • ledger + reconciliation hold throughout
  *
  * Time is simulated by pulling the deal's deadline forward; the real sweeper →
@@ -57,6 +62,9 @@ const post = (path: string, t: string, body?: unknown) => api(path, t, { method:
 const err = async (r: Response) => ((await r.json().catch(() => ({}))) as { error?: string }).error ?? "";
 
 type Stage = { idx: number; title: string; amountKobo: number; status: string };
+/** The booking's stages as roles: stay halves (1,2), cleaning (3), deposit (last). */
+const deposit_ = (st: Stage[]) => st[st.length - 1];
+const hostStages = (st: Stage[]) => st.slice(0, st.length - 1);
 type Deal = { id: string; state: string; priceKobo: number; terms?: { booking?: { nights: number } }; milestones?: Stage[] };
 const N = (naira: number) => naira * 100;
 /** YYYY-MM-DD, `days` from today (UTC is fine for test dates well in the future). */
@@ -70,6 +78,7 @@ async function main() {
   const guest2 = await newUser("sl-g2");
   const staff = await newUser("sl-a");
   const users = [host, guest, guest2, staff];
+  const uploads: string[] = [];
   const state = async (id: string) => (await sql<{ state: string }[]>`select state from public.deals where id = ${id}`)[0]!.state;
   // The host is a party to every booking here (each guest only to their own).
   const stages = async (id: string) => (await j<Deal>(await api(`/deals/${id}`, host.token))).milestones ?? [];
@@ -93,12 +102,14 @@ async function main() {
     };
     const bad = await post("/listings", host.token, { ...base, priceKobo: N(45_000), attributes: { propertyType: "apartment", dealType: "shortlet", beds: 1 } });
     check("shortlet without stay rules → 422", bad.status === 422 && (await err(bad)) === "shortlet_needs_stay_rules");
-    const lr = await post("/listings", host.token, {
-      ...base, priceKobo: N(45_000),
-      attributes: { propertyType: "apartment", dealType: "shortlet", beds: 1, minNights: 2, maxGuests: 3, cleaningKobo: N(10_000), cautionKobo: N(20_000) },
-    });
+    const attrs = { propertyType: "apartment", dealType: "shortlet", beds: 1, minNights: 2, maxGuests: 3, cleaningKobo: N(10_000), cautionKobo: N(20_000) };
+    const badAm = await post("/listings", host.token, { ...base, priceKobo: N(45_000), attributes: { ...attrs, amenities: ["power", "helipad"] } });
+    check("unknown amenity → 400 (schema validation)", badAm.status === 400, `${badAm.status}`);
+    const lr = await post("/listings", host.token, { ...base, priceKobo: N(45_000), attributes: { ...attrs, amenities: ["power", "wifi", "ac", "parking"] } });
     const L = await j<{ id: string }>(lr);
     check("host lists a shortlet (₦45,000/night, min 2, ₦10k cleaning, ₦20k deposit)", lr.status === 201, `${lr.status}`);
+    const got = await j<{ attributes: { amenities?: string[] } }>(await fetch(`${API}/listings/${L.id}`));
+    check("amenities are stored and shown", JSON.stringify(got.attributes?.amenities) === JSON.stringify(["power", "wifi", "ac", "parking"]), JSON.stringify(got.attributes?.amenities));
 
     const offer = await post(`/listings/${L.id}/offers`, guest.token, { priceKobo: N(40_000) });
     check("no offers on a shortlet → 409 book_first", offer.status === 409 && (await err(offer)) === "book_first", `${offer.status}`);
@@ -128,7 +139,8 @@ async function main() {
     const price = stay + deposit;
     let d = await j<Deal>(await api(`/deals/${dealId}`, guest.token));
     check("deal ACCEPTED at ₦165,000 (stay ₦145,000 + deposit ₦20,000)", d.state === "ACCEPTED" && d.priceKobo === price, `${d.state} ${d.priceKobo}`);
-    check("…with the stays as proposed stages", d.milestones?.length === 2 && d.milestones[0]!.amountKobo === stay && d.milestones[1]!.amountKobo === deposit);
+    const amts = d.milestones?.map((m) => m.amountKobo) ?? [];
+    check("…as stages: nights in two halves, cleaning, deposit last", JSON.stringify(amts) === JSON.stringify([N(67_500), N(67_500), N(10_000), deposit]), JSON.stringify(amts));
     const conv = await j<{ listing: { dealType?: string } }>(await api(`/conversations/${B.conversationId}`, guest.token));
     check("the thread knows it's a shortlet", conv.listing?.dealType === "shortlet", JSON.stringify(conv.listing?.dealType));
     const clash = await book(guest2, day(12), day(15));
@@ -164,7 +176,7 @@ async function main() {
     console.log("checkout → stay to the host, deposit held");
     await fastForward(dealId);
     check("checkout fires → HANDED_OFF (checked out)", await until("checkout", async () => (await state(dealId)) === "HANDED_OFF"));
-    check("stay settles → released", await until("stay settle", async () => (await stages(dealId))[0]?.status === "released"));
+    check("nights + cleaning settle → released", await until("stay settle", async () => hostStages(await stages(dealId)).every((x) => x.status === "released")));
     check("host owed the stay net of 2% — no fee on the deposit", (await bal(dealId, "seller_payable")) === stay - sellerFeeKobo(stay), `${await bal(dealId, "seller_payable")}`);
     check("escrow now holds just the deposit", (await bal(dealId, "escrow_holding")) === deposit);
     const dl2 = await deadline(dealId);
@@ -185,7 +197,7 @@ async function main() {
     console.log("48h later, no claim → deposit back to the guest");
     await fastForward(dealId);
     check("auto_release → COMPLETED", await until("complete", async () => (await state(dealId)) === "COMPLETED"));
-    check("deposit settles → refunded", await until("deposit back", async () => (await stages(dealId))[1]?.status === "refunded"));
+    check("deposit settles → refunded", await until("deposit back", async () => deposit_(await stages(dealId))?.status === "refunded"));
     check("guest got back exactly the deposit (no fee)", (await refunded(dealId)) === deposit, `${await refunded(dealId)}`);
     check("escrow empty; WCP kept buyer fee + seller fee on the stay", (await bal(dealId, "escrow_holding")) === 0 && (await bal(dealId, "wcp_fees")) === buyerFeeKobo(price) + sellerFeeKobo(stay), `${await bal(dealId, "wcp_fees")}`);
     const rv = await post(`/deals/${dealId}/review`, guest.token, { rating: 5, body: "Lovely stay" });
@@ -197,14 +209,23 @@ async function main() {
     check("guest 2 paid", await until("escrow 2", async () => (await state(B2.dealId)) === "PAID_IN_ESCROW"));
     await fastForward(B2.dealId);
     check("guest 2 checks out", await until("checkout 2", async () => (await state(B2.dealId)) === "HANDED_OFF"));
-    const cl = await post(`/deals/${B2.dealId}/claim-deposit`, host.token, { reason: "Broken TV", evidence: "photo" });
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const at = await j<{ path: string; uploadUrl: string }>(await post("/attachments", host.token, { contentType: "image/png" }));
+    const put = await fetch(at.uploadUrl, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
+    check("host uploads a damage photo to the private bucket", put.ok, `${put.status}`);
+    uploads.push(at.path);
+    const forged = await post(`/deals/${B2.dealId}/claim-deposit`, host.token, { reason: "Broken TV", photoPaths: [`${guest2.id}/00000000-0000-0000-0000-000000000000.png`] });
+    check("a photo path outside your own folder → 422 bad_photo", forged.status === 422 && (await err(forged)) === "bad_photo", `${forged.status}`);
+    const cl = await post(`/deals/${B2.dealId}/claim-deposit`, host.token, { reason: "Broken TV", evidence: "photo", photoPaths: [at.path] });
     check("host claims the deposit → DISPUTED_RESPONDED (awaiting admin)", cl.status === 200 && (await state(B2.dealId)) === "DISPUTED_RESPONDED", `${cl.status}`);
     check("no clock while an admin decides", !(await deadline(B2.dealId)));
+    const kase = await j<{ sellerPhotoUrls: string[] }>(await api(`/deals/${B2.dealId}/dispute`, guest2.token));
+    check("the case shows the host's photo (signed, fetchable)", kase.sellerPhotoUrls?.length === 1 && (await fetch(kase.sellerPhotoUrls[0]!)).ok, `${kase.sellerPhotoUrls?.length ?? 0} url(s)`);
     await sql`insert into public.staff_roles (user_id, role) values (${staff.id}, 'admin') on conflict (user_id) do update set role = 'admin'`;
     const rj = await post(`/deals/${B2.dealId}/dispute/resolve`, staff.token, { resolution: "refund", note: "no evidence" });
     check("admin rejects the claim → COMPLETED (not REFUNDED: the stay happened)", rj.status === 200 && (await state(B2.dealId)) === "COMPLETED", `${rj.status} ${await state(B2.dealId)}`);
-    check("deposit goes back to guest 2", await until("deposit 2", async () => (await stages(B2.dealId))[1]?.status === "refunded"));
-    check("host keeps the stay", (await stages(B2.dealId))[0]?.status === "released" && (await refunded(B2.dealId)) === deposit);
+    check("deposit goes back to guest 2", await until("deposit 2", async () => deposit_(await stages(B2.dealId))?.status === "refunded"));
+    check("host keeps the stay", hostStages(await stages(B2.dealId)).every((x) => x.status === "released") && (await refunded(B2.dealId)) === deposit);
     const freed = (await sql<{ active: boolean }[]>`select active from public.bookings where deal_id = ${B2.dealId}`)[0];
     check("a completed stay keeps its dates", freed?.active === true);
 
@@ -218,7 +239,7 @@ async function main() {
     await post(`/deals/${b3.dealId}/claim-deposit`, host.token, { reason: "Stained mattress" });
     const up = await post(`/deals/${b3.dealId}/dispute/resolve`, staff.token, { resolution: "release", note: "photos convincing" });
     check("admin upholds → COMPLETED", up.status === 200 && (await state(b3.dealId)) === "COMPLETED");
-    check("deposit released to the host", await until("deposit 3", async () => (await stages(b3.dealId))[1]?.status === "released"));
+    check("deposit released to the host", await until("deposit 3", async () => deposit_(await stages(b3.dealId))?.status === "released"));
     const stay3 = N(45_000) * 2 + N(10_000);
     check("host owed stay − 2% + the whole deposit (no fee on it)", (await bal(b3.dealId, "seller_payable")) === stay3 - sellerFeeKobo(stay3) + deposit, `${await bal(b3.dealId, "seller_payable")}`);
     check("guest got nothing back", (await refunded(b3.dealId)) === 0);
@@ -239,8 +260,62 @@ async function main() {
     const rebook = await book(guest2, day(25), day(27));
     check("…and they can be booked again", rebook.status === 201, `${rebook.status}`);
 
+    // ── Guest cancellation, tiered by notice (3F) ─────────────────────────
+    console.log("guest cancels paid stays: 7+ days / 2–7 days / under 48h");
+    // 2 nights everywhere: nights ₦90,000 (halves ₦45,000), cleaning ₦10,000, deposit ₦20,000.
+    const nights2 = N(45_000) * 2;
+    const half = nights2 / 2;
+    const price2 = nights2 + N(10_000) + deposit;
+    const fees2 = stageSellerFees([half, half, N(10_000)]);
+    const cFull = await book(guest, day(30), day(32));
+    const cHalf = await book(guest, day(4), day(6));
+    check("one guest holds several stays at one place (2 unpaid holds)", cFull.status === 201 && cHalf.status === 201, `${cFull.status} ${cHalf.status}`);
+    const third = await book(guest, day(40), day(42));
+    check("a third unpaid hold → 409 deal_active", third.status === 409 && (await err(third)) === "deal_active", `${third.status}`);
+    const kFull = (await j<{ dealId: string }>(cFull)).dealId;
+    const kHalf = (await j<{ dealId: string }>(cHalf)).dealId;
+    const unpaid = await post(`/deals/${kFull}/cancel-booking`, guest.token);
+    check("can't cancel an unpaid hold this way → 409 not_cancellable", unpaid.status === 409 && (await err(unpaid)) === "not_cancellable", `${unpaid.status}`);
+    await post(`/deals/${kFull}/pay`, guest.token);
+    await post(`/deals/${kHalf}/pay`, guest.token);
+    check("both paid", await until("escrow c", async () => (await state(kFull)) === "PAID_IN_ESCROW" && (await state(kHalf)) === "PAID_IN_ESCROW"));
+    const kNone = (await j<{ dealId: string }>(await book(guest, day(1), day(3)))).dealId;
+    await post(`/deals/${kNone}/pay`, guest.token);
+    check("a stay tomorrow, paid", await until("escrow c3", async () => (await state(kNone)) === "PAID_IN_ESCROW"));
+
+    const hostCancel = await post(`/deals/${kFull}/cancel-booking`, host.token);
+    check("the host can't use the guest's cancel → 404", hostCancel.status === 404, `${hostCancel.status}`);
+    type Quote = { cancellable: boolean; tier: string; refundKobo: number; hostKobo: number };
+    const expect: [string, string, string, number][] = [
+      [kFull, "30 days out", "full_refund", 0],
+      [kHalf, "4 days out", "half", half],
+      [kNone, "tomorrow", "no_refund", nights2],
+    ];
+    for (const [id, when, tier, hostKobo] of expect) {
+      const q = await j<Quote>(await api(`/deals/${id}/cancellation`, guest.token));
+      check(`${when}: preview says ${tier}, host keeps ₦${hostKobo / 100}`, q.cancellable && q.tier === tier && q.hostKobo === hostKobo && q.refundKobo === price2 - hostKobo, JSON.stringify(q));
+      const cr = await post(`/deals/${id}/cancel-booking`, guest.token);
+      const c = await j<Quote>(cr);
+      check(`${when}: cancel → 200, same split`, cr.status === 200 && c.tier === tier && c.hostKobo === hostKobo, `${cr.status} ${JSON.stringify(c)}`);
+    }
+    for (const [id, when, , hostKobo] of expect) {
+      check(`${when}: → CANCELLED`, (await state(id)) === "CANCELLED", await state(id));
+      check(`${when}: every stage settles`, await until(`settle ${when}`, async () => (await stages(id)).every((x) => x.status === "released" || x.status === "refunded")));
+      const hostFee = hostKobo === 0 ? 0 : hostKobo === half ? fees2[0]! : fees2[0]! + fees2[1]!;
+      check(`${when}: guest got back ₦${(price2 - hostKobo) / 100} (cleaning + deposit always; no buyer fee)`, (await refunded(id)) === price2 - hostKobo, `${await refunded(id)}`);
+      check(`${when}: host owed its share net of 2%`, (await bal(id, "seller_payable")) === hostKobo - hostFee, `${await bal(id, "seller_payable")}`);
+      check(`${when}: WCP keeps the buyer fee (+ seller fee on the host share); escrow empty`,
+        (await bal(id, "wcp_fees")) === buyerFeeKobo(price2) + hostFee && (await bal(id, "escrow_holding")) === 0, `${await bal(id, "wcp_fees")}`);
+      const fr = (await sql<{ active: boolean }[]>`select active from public.bookings where deal_id = ${id}`)[0];
+      check(`${when}: dates freed`, fr?.active === false);
+    }
+    const again = await post(`/deals/${kHalf}/cancel-booking`, guest.token);
+    check("cancelling twice → 409", again.status === 409, `${again.status}`);
+    const reb = await book(guest2, day(4), day(6));
+    check("cancelled dates can be booked again", reb.status === 201, `${reb.status}`);
+
     rec = await reconcile(sql);
-    const ids = [dealId, B2.dealId, b3.dealId, b4.dealId];
+    const ids = [dealId, B2.dealId, b3.dealId, b4.dealId, kFull, kHalf, kNone];
     check("reconcile clean for every booking", !ids.some((id) => rec.driftDeals.some((x) => x.dealId === id) || rec.settlementOverdue.some((x) => x.dealId === id) || rec.stagesOverdue.some((s) => s.dealId === id)) && rec.globalBalanceKobo === 0);
   } finally {
     const deals = sql`select id from public.deals where seller_id = ${host.id}`;
@@ -258,10 +333,11 @@ async function main() {
     await sql`delete from public.listings where seller_id = ${host.id}`;
     await sql`delete from public.kyc_verifications where user_id = ${host.id}`.catch(() => {});
     await sql`delete from public.staff_roles where user_id = ${staff.id}`.catch(() => {});
+    if (uploads.length) await fetch(`${BASE}/storage/v1/object/attachments`, { method: "DELETE", headers: { ...admin, "Content-Type": "application/json" }, body: JSON.stringify({ prefixes: uploads }) });
     await sql.end({ timeout: 5 });
     for (const u of users) await fetch(`${BASE}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: admin });
   }
-  console.log(`\nVERDICT → ${pass ? "PASS ✅ shortlet bookings work end-to-end (deployed)" : "FAIL ❌"}`);
+  console.log(`\nVERDICT → ${pass ? "PASS ✅ shortlet bookings + cancellation work end-to-end (deployed)" : "FAIL ❌"}`);
   process.exit(pass ? 0 : 1);
 }
 main().catch((e) => { console.error("FAIL", e); process.exit(1); });

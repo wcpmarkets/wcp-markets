@@ -1,5 +1,5 @@
-import type { DealTerms, Tx } from "./commands.js";
-import { sellerFeeKobo, stageSellerFees } from "../money/fees.js";
+import type { BookingTerms, DealTerms, Tx } from "./commands.js";
+import { stageSellerFees } from "../money/fees.js";
 
 /**
  * Milestone escrow (22c-quotebuild, 22c-quotecard-staged, 22c-milestone).
@@ -84,8 +84,62 @@ export async function stagesOf(sql: Tx, dealId: string, lock = false): Promise<S
  * awards it to the host that is compensation, not a sale WCP takes a cut of.
  */
 export function stageFees(terms: DealTerms | null | undefined, amounts: readonly number[]): number[] {
-  if (terms?.booking) return amounts.map((a, i) => (i === 0 ? sellerFeeKobo(a) : 0));
+  if (terms?.booking) {
+    // The host-bound stages (both halves of the stay + cleaning) share the ordinary
+    // fee on their total; the deposit (last, when taken) carries none.
+    const dep = terms.booking.cautionKobo > 0 ? 1 : 0;
+    const host = amounts.slice(0, amounts.length - dep);
+    return [...stageSellerFees(host), ...amounts.slice(host.length).map(() => 0)];
+  }
   return stageSellerFees(amounts);
+}
+
+// ── Shortlet bookings ────────────────────────────────────────────────────────
+// A booking is materialised as stages chosen so that every outcome is a set of whole
+// stages released or returned. Stage amounts are immutable once held, so a split can
+// never be cut at cancel time — it has to exist from the start:
+//
+//   1 Stay · first half   floor(nightly total / 2)
+//   2 Stay · second half  the rest of the nightly total
+//   3 Cleaning            (when the listing charges one)
+//   4 Caution deposit     (when the listing takes one) — always last
+//
+// Checkout releases the stay halves + cleaning. A guest cancelling releases none, one
+// or both halves by notice and returns everything else: 7+ days → nothing to the
+// host, 2–7 days → 50%, under 48h → the nightly total; cleaning + deposit always back.
+
+export function bookingPlan(b: BookingTerms): StagePlan[] {
+  const nightly = b.nightlyKobo * b.nights;
+  const first = Math.floor(nightly / 2);
+  return [
+    { title: "Stay · first half", amountKobo: first },
+    { title: "Stay · second half", amountKobo: nightly - first },
+    ...(b.cleaningKobo > 0 ? [{ title: "Cleaning", amountKobo: b.cleaningKobo }] : []),
+    ...(b.cautionKobo > 0 ? [{ title: "Caution deposit", amountKobo: b.cautionKobo }] : []),
+  ];
+}
+
+/** Which stage idx plays which role in a booking (1-based, as materialised). */
+export function bookingRoles(b: BookingTerms): { stay: [number, number]; cleaning: number | null; deposit: number | null } {
+  const cleaning = b.cleaningKobo > 0 ? 3 : null;
+  const deposit = b.cautionKobo > 0 ? (cleaning ? 4 : 3) : null;
+  return { stay: [1, 2], cleaning, deposit };
+}
+
+export type CancelTier = "full_refund" | "half" | "no_refund";
+/** Notice (hours before check-in) that decides a cancellation's tier. */
+export const CANCEL_FULL_HOURS = 7 * 24;
+export const CANCEL_HALF_HOURS = 48;
+
+export function cancelTier(hoursToCheckIn: number): CancelTier {
+  if (hoursToCheckIn >= CANCEL_FULL_HOURS) return "full_refund";
+  if (hoursToCheckIn >= CANCEL_HALF_HOURS) return "half";
+  return "no_refund";
+}
+
+/** The stay halves the host keeps for a tier; everything else goes back. */
+export function hostStagesFor(tier: CancelTier): number[] {
+  return tier === "full_refund" ? [] : tier === "half" ? [1] : [1, 2];
 }
 
 /** Stage fees for a deal read from the DB (settlement paths that only hold a deal id). */

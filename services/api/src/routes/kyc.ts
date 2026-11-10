@@ -207,7 +207,7 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       // stages as work is done"), so its released money is withdrawable mid-job. Never
       // during a dispute — that freezes the job's money until it's resolved.
       const [staged] = await db`select 1 from public.deal_milestones where deal_id = ${id} limit 1`;
-      const payable = deal.state === "COMPLETED" || (!!staged && ["PAID_IN_ESCROW", "HANDED_OFF"].includes(deal.state));
+      const payable = deal.state === "COMPLETED" || (!!staged && ["PAID_IN_ESCROW", "HANDED_OFF", "CANCELLED"].includes(deal.state));
       if (!payable) return c.json({ error: "not_payable" }, 409);
 
       // The gate: no payout until the seller is L2-verified.

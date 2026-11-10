@@ -44,7 +44,7 @@ const api = (path: string, t: string | null, init: RequestInit = {}) =>
 const err = async (r: Response) => ((await r.json().catch(() => ({}))) as { error?: string }).error ?? "";
 
 type Listing = { id: string; lane: string; stock: number; priceKobo: number; attributes: Record<string, unknown> };
-type Req = { id: string; conversationId: string; stage: string; status: string; dealId: string | null; dealState: string | null; quotedKobo: number | null; startsAt: string | null };
+type Req = { id: string; conversationId: string; stage: string; status: string; dealId: string | null; dealState: string | null; quotedKobo: number | null; startsAt: string | null; photoUrls: string[] };
 type Deal = { id: string; state: string; priceKobo: number; terms?: { service: string; scope?: string | null; startsAt?: string | null } };
 type Page = { items: Req[]; counts: { all: number; new: number; quoted: number; scheduled: number } };
 
@@ -121,13 +121,22 @@ async function main() {
     const own = await api(`/listings/${L.id}/quote-requests`, pro.token, { method: "POST", body: JSON.stringify({ service: "x", description: "y" }) });
     check("provider requesting own service → 400", own.status === 400);
     const brief = { service: "Full bathroom plumbing", description: "2 sinks + shower re-pipe", state: "Lagos", city: "Yaba", preferred: "Sat AM" };
-    const rq = await api(`/listings/${L.id}/quote-requests`, buyer.token, { method: "POST", body: JSON.stringify(brief) });
+    // A photo of the job: POST /attachments → PUT the bytes → pass the path back.
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const at = await j<{ path: string; uploadUrl: string }>(await api(`/attachments`, buyer.token, { method: "POST", body: JSON.stringify({ contentType: "image/png" }) }));
+    const put = await fetch(at.uploadUrl, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
+    check("buyer uploads a job photo", put.ok && at.path.startsWith(`${buyer.id}/`), `${put.status}`);
+    const foreign = await api(`/listings/${L.id}/quote-requests`, other.token, { method: "POST", body: JSON.stringify({ ...brief, photoPaths: [at.path] }) });
+    check("someone else's photo path → 422 bad_photo", foreign.status === 422 && (await err(foreign)) === "bad_photo", `${foreign.status}`);
+    const rq = await api(`/listings/${L.id}/quote-requests`, buyer.token, { method: "POST", body: JSON.stringify({ ...brief, photoPaths: [at.path] }) });
     const R = await j<Req>(rq);
     check("buyer sends a quote request → 201, stage new", rq.status === 201 && R.stage === "new" && R.status === "open", `${rq.status} ${R.stage}`);
+    check("the request carries a signed, fetchable photo URL", R.photoUrls?.length === 1 && (await fetch(R.photoUrls[0]!)).ok, `${R.photoUrls?.length ?? 0} url(s)`);
     const conv = await j<{ quoteRequest?: Req; lastMessage: unknown }>(await api(`/conversations/${R.conversationId}`, buyer.token));
     check("conversation carries the open request", conv.quoteRequest?.id === R.id);
     const inbox0 = await j<Page>(await api(`/quote-requests`, pro.token));
     check("provider inbox: 1 new", inbox0.counts.new === 1 && inbox0.items[0]?.id === R.id, JSON.stringify(inbox0.counts));
+    check("…and the provider sees the photo", inbox0.items[0]?.photoUrls?.length === 1);
     const proConvs = await j<{ items: { id: string }[] }>(await api(`/conversations`, pro.token));
     check("request alone lifts the thread into the provider's messages", proConvs.items.some((c) => c.id === R.conversationId));
     const outsider = await api(`/quote-requests/${R.id}/quote`, other.token, { method: "POST", body: JSON.stringify({ priceKobo: 1_000_00 }) });

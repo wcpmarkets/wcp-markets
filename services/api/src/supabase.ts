@@ -70,6 +70,36 @@ export async function createSignedDownloadUrl(
 }
 
 /** Delete a private object (best-effort — used to clean up orphaned KYC selfies). */
+/**
+ * Sign many objects in one call (Storage's batch sign). Returns a URL per input path,
+ * in order — null where an object is missing or signing failed — so a list endpoint
+ * never fans out one request per photo.
+ */
+export async function createSignedDownloadUrls(
+  bucket: string,
+  paths: readonly string[],
+  expiresIn = 3600,
+): Promise<(string | null)[]> {
+  if (!paths.length) return [];
+  const key = await getServiceKey();
+  if (!key) return paths.map(() => null);
+  const res = await fetch(`${storageBase()}/object/sign/${bucket}`, {
+    method: "POST",
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ expiresIn, paths }),
+  });
+  if (!res.ok) {
+    console.error("[supabase] batch sign failed", res.status, await res.text());
+    return paths.map(() => null);
+  }
+  const body = (await res.json()) as { path: string | null; signedURL: string | null; error?: string | null }[];
+  const byPath = new Map(body.map((r) => [r.path, r.signedURL]));
+  return paths.map((p) => {
+    const u = byPath.get(p);
+    return u ? `${storageBase()}${u}` : null;
+  });
+}
+
 export async function deleteStorageObject(bucket: string, path: string): Promise<void> {
   const key = await getServiceKey();
   if (!key) return;
@@ -84,3 +114,4 @@ export async function deleteStorageObject(bucket: string, path: string): Promise
 }
 
 export const LISTING_IMAGES_BUCKET = "listing-images";
+export const ATTACHMENTS_BUCKET = "attachments";

@@ -15,6 +15,7 @@ import { registerVehicles } from "./routes/vehicles.js";
 import { registerViewings } from "./routes/viewings.js";
 import { registerServices } from "./routes/services.js";
 import { registerBookings } from "./routes/bookings.js";
+import { registerAttachments } from "./routes/attachments.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -63,6 +64,7 @@ export function createApp() {
   registerServices(app);
   // ── Property shortlets: dated bookings into escrow (Phase 3 E) ─────────────
   registerBookings(app);
+  registerAttachments(app);
 
   // ── POST /auth/otp/request ──────────────────────────────────────────────────
   // Throttled OTP request. Rate-limiting lives HERE (per-phone + per-IP) so a bare
@@ -166,7 +168,7 @@ export type App = ReturnType<typeof createApp>;
 
 /** OpenAPI 3.1 document — the committed contract artifact + runtime `/openapi.json`. */
 export function openApiDocument(app: App): Record<string, unknown> {
-  return app.getOpenAPI31Document({
+  const doc = app.getOpenAPI31Document({
     openapi: "3.1.0",
     info: {
       title: "WCP Markets API",
@@ -174,4 +176,35 @@ export function openApiDocument(app: App): Record<string, unknown> {
       description: "Contract-first API for the WCP Markets platform.",
     },
   }) as unknown as Record<string, unknown>;
+  markMoneyInt64(doc);
+  return doc;
+}
+
+/**
+ * Money is integer kobo, and real amounts outgrow 32 bits fast: a ₦50M flat is
+ * 5,000,000,000 kobo, past Int32's ~₦21.5M. JSON numbers are fine to 2^53, but typed
+ * clients map a bare `integer` to Int32 (Kotlin `Int`), so every money field is
+ * stamped `format: int64` here, in one place, rather than on each schema by hand:
+ * any property or query parameter named `*Kobo`, plus the `minPrice`/`maxPrice` filters.
+ */
+const MONEY_PARAM = /Kobo$|^(min|max)Price$/;
+function markMoneyInt64(node: unknown, key?: string): void {
+  if (Array.isArray(node)) {
+    for (const n of node) markMoneyInt64(n);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  const o = node as Record<string, unknown>;
+  // A query parameter: { name: "minPrice", in: "query", schema: {...} }
+  if (typeof o.name === "string" && o.in && MONEY_PARAM.test(o.name)) stampInt64(o.schema);
+  for (const [k, v] of Object.entries(o)) {
+    if (key === "properties" && /Kobo$/.test(k)) stampInt64(v);
+    markMoneyInt64(v, k);
+  }
+}
+function stampInt64(schema: unknown): void {
+  if (!schema || typeof schema !== "object") return;
+  const s = schema as Record<string, unknown>;
+  const t = s.type;
+  if (t === "integer" || (Array.isArray(t) && t.includes("integer"))) s.format = "int64";
 }

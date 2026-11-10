@@ -1790,7 +1790,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Unknown area */
+                /** @description Unknown area, or a photo that isn't yours (bad_photo) */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -2179,7 +2179,212 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description A photo that isn't yours (bad_photo) */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/deals/{id}/cancellation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview what a guest gets back by cancelling a paid stay now */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The split if cancelled now */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CancellationQuote"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not your booking */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/deals/{id}/cancel-booking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Guest cancels a paid stay before check-in (refund tiered by notice) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Cancelled */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingCancelled"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not your booking */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not cancellable: unpaid, already checked in (report a problem instead), or already over (not_cancellable) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get a signed upload URL for a photo to attach to a request, claim or dispute */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["AttachmentUploadRequest"];
+                };
+            };
+            responses: {
+                /** @description PUT the bytes to uploadUrl */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AttachmentUpload"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Too many uploads */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Storage unavailable */
                 503: {
                     headers: {
                         [name: string]: unknown;
@@ -3452,6 +3657,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description A photo that isn't yours (bad_photo) */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Database unavailable */
                 503: {
                     headers: {
@@ -3519,6 +3733,15 @@ export interface paths {
                 };
                 /** @description Not in a respondable state */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A photo that isn't yours (bad_photo) */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -4350,6 +4573,7 @@ export interface components {
             title: string;
             lane: string;
             dealType?: string;
+            /** Format: int64 */
             priceKobo: number;
             status: string;
             imageUrl: string | null;
@@ -4414,9 +4638,11 @@ export interface components {
             /** Format: uuid */
             dealId: string | null;
             dealState: string | null;
+            /** Format: int64 */
             quotedKobo: number | null;
             startsAt: string | null;
             createdAt: string;
+            photoUrls: string[];
         };
         Conversation: {
             /** Format: uuid */
@@ -4535,9 +4761,11 @@ export interface components {
         };
         VehiclePriceInsight: {
             comparables: number;
+            /** Format: int64 */
             medianKobo: number | null;
             /** @enum {string|null} */
             verdict: "below" | "fair" | "above" | null;
+            /** Format: int64 */
             deltaKobo: number | null;
         };
         ViewingCreate: {
@@ -4564,6 +4792,7 @@ export interface components {
             city?: string;
             location?: string;
             preferred?: string;
+            photoPaths?: string[];
         };
         QuoteRequestCounts: {
             all: number;
@@ -4577,9 +4806,11 @@ export interface components {
         };
         StagePlan: {
             title: string;
+            /** Format: int64 */
             amountKobo: number;
         };
         QuoteCreate: {
+            /** Format: int64 */
             priceKobo: number;
             scope?: string;
             /** Format: date-time */
@@ -4611,6 +4842,36 @@ export interface components {
         DepositClaim: {
             reason: string;
             evidence?: string;
+            photoPaths?: string[];
+        };
+        CancellationQuote: {
+            cancellable: boolean;
+            /** @enum {string} */
+            tier: "full_refund" | "half" | "no_refund";
+            hoursToCheckIn: number;
+            /** Format: int64 */
+            refundKobo: number;
+            /** Format: int64 */
+            hostKobo: number;
+        };
+        BookingCancelled: {
+            /** Format: uuid */
+            dealId: string;
+            /** @enum {string} */
+            tier: "full_refund" | "half" | "no_refund";
+            /** Format: int64 */
+            refundKobo: number;
+            /** Format: int64 */
+            hostKobo: number;
+        };
+        AttachmentUpload: {
+            path: string;
+            /** Format: uri */
+            uploadUrl: string;
+        };
+        AttachmentUploadRequest: {
+            /** @enum {string} */
+            contentType: "image/jpeg" | "image/png" | "image/webp";
         };
         OtpRequested: {
             /** @enum {string} */
@@ -4621,6 +4882,7 @@ export interface components {
         };
         RateItem: {
             name: string;
+            /** Format: int64 */
             fromKobo?: number;
         };
         ListingAttributes: {
@@ -4632,8 +4894,11 @@ export interface components {
             baths?: number;
             minNights?: number;
             maxGuests?: number;
+            /** Format: int64 */
             cleaningKobo?: number;
+            /** Format: int64 */
             cautionKobo?: number;
+            amenities?: ("power" | "water" | "wifi" | "ac" | "security" | "parking" | "kitchen" | "pool")[];
             make?: string;
             model?: string;
             year?: number;
@@ -4665,6 +4930,7 @@ export interface components {
             category: string;
             title: string;
             description: string | null;
+            /** Format: int64 */
             priceKobo: number;
             /** @enum {string} */
             currency: "NGN";
@@ -4691,6 +4957,7 @@ export interface components {
             category: string;
             title: string;
             description?: string;
+            /** Format: int64 */
             priceKobo: number;
             negotiable?: boolean;
             stock?: number;
@@ -4732,6 +4999,7 @@ export interface components {
             category?: string;
             title?: string;
             description?: string | null;
+            /** Format: int64 */
             priceKobo?: number;
             negotiable?: boolean;
             stock?: number;
@@ -4756,8 +5024,11 @@ export interface components {
             checkOut: string;
             guests: number;
             nights: number;
+            /** Format: int64 */
             nightlyKobo: number;
+            /** Format: int64 */
             cleaningKobo: number;
+            /** Format: int64 */
             cautionKobo: number;
         };
         DealTerms: {
@@ -4770,6 +5041,7 @@ export interface components {
         DealMilestone: {
             idx: number;
             title: string;
+            /** Format: int64 */
             amountKobo: number;
             /** @enum {string} */
             status: "proposed" | "held" | "releasing" | "released" | "refunding" | "refunded";
@@ -4789,6 +5061,7 @@ export interface components {
             state: string;
             /** Format: uuid */
             stateToken: string;
+            /** Format: int64 */
             priceKobo: number;
             qty: number;
             terms?: components["schemas"]["DealTerms"];
@@ -4797,6 +5070,7 @@ export interface components {
             updatedAt: string;
         };
         OfferCreate: {
+            /** Format: int64 */
             priceKobo: number;
             qty?: number;
         };
@@ -4807,6 +5081,7 @@ export interface components {
             action: string;
             fromState: string | null;
             toState: string;
+            /** Format: int64 */
             priceKobo: number | null;
             qty: number | null;
             reason: string | null;
@@ -4818,6 +5093,7 @@ export interface components {
         DealAction: {
             /** @enum {string} */
             action: "counter" | "accept" | "decline" | "withdraw" | "cancel";
+            /** Format: int64 */
             priceKobo?: number;
             qty?: number;
             milestones?: components["schemas"]["StagePlan"][];
@@ -4843,6 +5119,8 @@ export interface components {
             buyerEvidence: string | null;
             sellerResponse: string | null;
             sellerEvidence: string | null;
+            buyerPhotoUrls: string[];
+            sellerPhotoUrls: string[];
             /** @enum {string} */
             status: "open" | "responded" | "resolved";
             /** @enum {string|null} */
@@ -4857,10 +5135,12 @@ export interface components {
         DisputeOpen: {
             reason: string;
             evidence?: string;
+            photoPaths?: string[];
         };
         DisputeRespond: {
             response: string;
             evidence?: string;
+            photoPaths?: string[];
         };
         DisputeResolve: {
             /** @enum {string} */
@@ -4939,6 +5219,7 @@ export interface components {
             dealId: string;
             /** Format: uuid */
             sellerId: string;
+            /** Format: int64 */
             amountKobo: number;
             /** @enum {string} */
             status: "pending" | "settled" | "failed";

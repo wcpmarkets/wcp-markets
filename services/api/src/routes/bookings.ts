@@ -2,7 +2,10 @@ import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { auth, type AuthEnv } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rate-limit.js";
 import { getDb } from "../db.js";
-import { createBooking, transition } from "../deals/commands.js";
+import { createBooking, transition, type DealRow, type DealTerms } from "../deals/commands.js";
+import { cancellationSplit } from "../deals/effects.js";
+import { bookingRoles, type StageRow } from "../deals/stages.js";
+import { ownedPaths, PhotoPathsSchema } from "./attachments.js";
 import { isBlockedEitherWay } from "../profiles/summary.js";
 
 /**
@@ -43,8 +46,31 @@ const AvailabilitySchema = z
   .openapi("Availability");
 
 const DepositClaimSchema = z
-  .object({ reason: z.string().trim().min(1).max(2000), evidence: z.string().max(4000).optional() })
+  .object({
+    reason: z.string().trim().min(1).max(2000),
+    evidence: z.string().max(4000).optional(),
+    /** Photos of the damage (POST /attachments first). */
+    photoPaths: PhotoPathsSchema.optional(),
+  })
   .openapi("DepositClaim");
+
+const CancellationQuoteSchema = z
+  .object({
+    /** Whether the guest can still cancel (paid, before check-in). */
+    cancellable: z.boolean(),
+    /** By notice: 7+ days → full_refund, 2–7 days → half, under 48h → no_refund (of the nightly total). */
+    tier: z.enum(["full_refund", "half", "no_refund"]),
+    hoursToCheckIn: z.number(),
+    /** Back to the guest: the unreleased stay, cleaning and the deposit (WCP keeps its fee). */
+    refundKobo: z.number().int(),
+    /** Kept by the host, before WCP's 2%. */
+    hostKobo: z.number().int(),
+  })
+  .openapi("CancellationQuote");
+
+const BookingCancelledSchema = z
+  .object({ dealId: z.string().uuid(), tier: z.enum(["full_refund", "half", "no_refund"]), refundKobo: z.number().int(), hostKobo: z.number().int() })
+  .openapi("BookingCancelled");
 
 /** Booking window: from today (Lagos) up to a year ahead; stays of up to 30 nights. */
 const MAX_AHEAD_DAYS = 365;
@@ -176,6 +202,7 @@ export function registerBookings(app: OpenAPIHono<AuthEnv>) {
           description: "Not claimable: outside the window after checkout, or no deposit held (no_deposit)",
           content: { "application/json": { schema: ErrorSchema } },
         },
+        422: { description: "A photo that isn't yours (bad_photo)", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -185,11 +212,14 @@ export function registerBookings(app: OpenAPIHono<AuthEnv>) {
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const { id } = c.req.valid("param");
       const b = c.req.valid("json");
-      const [deal] = await db<{ seller_id: string }[]>`select seller_id from public.deals where id = ${id}`;
+      const [deal] = await db<{ seller_id: string; terms: DealTerms | null }[]>`select seller_id, terms from public.deals where id = ${id}`;
       if (!deal || deal.seller_id !== user.sub) return c.json({ error: "not_found" }, 404);
-      // Stage 2 of a booking is its caution deposit (commands.ts createBooking).
-      const [deposit] = await db<{ status: string }[]>`
-        select status from public.deal_milestones where deal_id = ${id} and idx = 2
+      const photos = ownedPaths(user.sub, b.photoPaths);
+      if (!photos) return c.json({ error: "bad_photo" }, 422);
+      // The deposit is the booking's last stage when one was taken (stages.ts bookingPlan).
+      const depositIdx = deal.terms?.booking ? bookingRoles(deal.terms.booking).deposit : null;
+      const [deposit] = depositIdx == null ? [] : await db<{ status: string }[]>`
+        select status from public.deal_milestones where deal_id = ${id} and idx = ${depositIdx}
       `;
       if (deposit?.status !== "held") return c.json({ error: "no_deposit" }, 409);
 
@@ -207,13 +237,94 @@ export function registerBookings(app: OpenAPIHono<AuthEnv>) {
       }
       // The support case: the host's claim is the case, already awaiting an admin.
       await db`
-        insert into public.dispute_cases (deal_id, opened_by, reason, seller_evidence, status, responded_at)
-        values (${id}, ${user.sub}, ${b.reason}, ${b.evidence ?? null}, 'responded', now())
+        insert into public.dispute_cases (deal_id, opened_by, reason, seller_evidence, seller_photo_paths, status, responded_at)
+        values (${id}, ${user.sub}, ${b.reason}, ${b.evidence ?? null}, ${photos}, 'responded', now())
         on conflict (deal_id) do update
           set opened_by = excluded.opened_by, reason = excluded.reason, seller_evidence = excluded.seller_evidence,
+              seller_photo_paths = excluded.seller_photo_paths,
               status = 'responded', resolution = null, resolved_by = null, resolved_at = null, responded_at = now()
       `;
       return c.json({ dealId: id }, 200);
+    },
+  );
+
+  // ── Guest cancellation (tiered by notice) ───────────────────────────────────
+  // GET previews what cancelling now would return, so the app can say it before the
+  // guest commits; POST does it. Both compute the split from the same function the
+  // effect uses (effects.ts cancellationSplit), at the moment of asking.
+  const loadForCancel = async (db: NonNullable<Awaited<ReturnType<typeof getDb>>>, id: string, userId: string) => {
+    const [deal] = await db<DealRow[]>`select * from public.deals where id = ${id}`;
+    if (!deal || deal.buyer_id !== userId || !deal.terms?.booking) return null;
+    return { deal, stages: await db<StageRow[]>`select * from public.deal_milestones where deal_id = ${id} order by idx` };
+  };
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/deals/{id}/cancellation",
+      summary: "Preview what a guest gets back by cancelling a paid stay now",
+      tags: ["bookings"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      request: { params: z.object({ id: z.string().uuid() }) },
+      responses: {
+        200: { description: "The split if cancelled now", content: { "application/json": { schema: CancellationQuoteSchema } } },
+        401: { description: "Unauthorized" },
+        404: { description: "Not your booking" },
+        503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
+      },
+    }),
+    async (c) => {
+      const user = c.get("user");
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const got = await loadForCancel(db, c.req.valid("param").id, user.sub);
+      if (!got) return c.json({ error: "not_found" }, 404);
+      const s = cancellationSplit(got.deal, got.stages);
+      const cancellable = got.deal.state === "PAID_IN_ESCROW" && s.hoursToCheckIn > 0;
+      return c.json(
+        { cancellable, tier: s.tier, hoursToCheckIn: Math.round(s.hoursToCheckIn * 10) / 10, refundKobo: s.refundKobo, hostKobo: s.hostKobo },
+        200,
+      );
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/deals/{id}/cancel-booking",
+      summary: "Guest cancels a paid stay before check-in (refund tiered by notice)",
+      tags: ["bookings"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      request: { params: z.object({ id: z.string().uuid() }) },
+      responses: {
+        200: { description: "Cancelled", content: { "application/json": { schema: BookingCancelledSchema } } },
+        401: { description: "Unauthorized" },
+        404: { description: "Not your booking" },
+        409: {
+          description: "Not cancellable: unpaid, already checked in (report a problem instead), or already over (not_cancellable)",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
+        503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
+      },
+    }),
+    async (c) => {
+      const user = c.get("user");
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const { id } = c.req.valid("param");
+      const got = await loadForCancel(db, id, user.sub);
+      if (!got) return c.json({ error: "not_found" }, 404);
+      // The split reported is the one the effect applies (same instant, give or take
+      // the tx): the effect recomputes it under the deal lock.
+      const s = cancellationSplit(got.deal, got.stages);
+      const r = await transition(db, { dealId: id, actor: "BUYER", actorId: user.sub, action: "cancel_booking", idempotencyKey: idem(c) });
+      if (!r.ok) {
+        if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
+        return c.json({ error: r.code === "illegal" ? "not_cancellable" : "conflict" }, 409);
+      }
+      return c.json({ dealId: id, tier: s.tier, refundKobo: s.refundKobo, hostKobo: s.hostKobo }, 200);
     },
   );
 }

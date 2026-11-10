@@ -3,11 +3,11 @@
 
 -- All valid deal states (for the CHECK on deals.state / deal_events.to_state).
 create or replace function public.deal_states() returns text[] language sql immutable as $$
-  select array['OFFERED', 'COUNTERED_BY_SELLER', 'COUNTERED_BY_BUYER', 'ACCEPTED', 'PAYMENT_PENDING', 'PAID_IN_ESCROW', 'HANDED_OFF', 'DISPUTED', 'DISPUTED_RESPONDED', 'WITHDRAWN', 'DECLINED', 'EXPIRED', 'COMPLETED', 'REFUNDED']::text[];
+  select array['OFFERED', 'COUNTERED_BY_SELLER', 'COUNTERED_BY_BUYER', 'ACCEPTED', 'PAYMENT_PENDING', 'PAID_IN_ESCROW', 'HANDED_OFF', 'DISPUTED', 'DISPUTED_RESPONDED', 'WITHDRAWN', 'DECLINED', 'EXPIRED', 'COMPLETED', 'REFUNDED', 'CANCELLED']::text[];
 $$;
 
 create or replace function public.deal_terminal_states() returns text[] language sql immutable as $$
-  select array['WITHDRAWN', 'DECLINED', 'EXPIRED', 'COMPLETED', 'REFUNDED']::text[];
+  select array['WITHDRAWN', 'DECLINED', 'EXPIRED', 'COMPLETED', 'REFUNDED', 'CANCELLED']::text[];
 $$;
 
 -- The transition table, materialised as a function. Returns the resulting state for
@@ -45,6 +45,7 @@ returns text language sql immutable as $$
     ('HANDED_OFF', 'SYSTEM', 'release_stage', 'PAID_IN_ESCROW'),
     ('PAID_IN_ESCROW', 'SYSTEM', 'check_out', 'HANDED_OFF'),
     ('HANDED_OFF', 'SELLER', 'claim_deposit', 'DISPUTED_RESPONDED'),
+    ('PAID_IN_ESCROW', 'BUYER', 'cancel_booking', 'CANCELLED'),
     ('PAID_IN_ESCROW', 'BUYER', 'dispute', 'DISPUTED'),
     ('HANDED_OFF', 'BUYER', 'dispute', 'DISPUTED'),
     ('DISPUTED', 'SYSTEM', 'auto_refund', 'REFUNDED'),
