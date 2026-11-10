@@ -36,6 +36,8 @@ export type DealRow = {
   qty: number;
   /** Service quotes only (0025): what the price is for, and when the job starts. */
   terms: DealTerms | null;
+  /** The money rail, set at pay (0030): Paystack, or the mock for test accounts. */
+  payment_provider?: "mock" | "paystack" | null;
   created_at: string | Date;
   updated_at: string | Date;
 };

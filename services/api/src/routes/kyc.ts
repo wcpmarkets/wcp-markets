@@ -199,7 +199,7 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
         401: { description: "Unauthorized" },
         403: { description: "kyc_required (L2) / kyc_reverify (verify again once, for account recovery)", content: { "application/json": { schema: ErrorSchema } } },
         404: { description: "Not found" },
-        409: { description: "Not payable / already requested / recovery_hold (account recovery in progress)", content: { "application/json": { schema: ErrorSchema } } },
+        409: { description: "Not payable / already requested / recovery_hold (account recovery in progress) / no_payout_account", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -226,6 +226,12 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       if (!kh?.id_hash && (await hasPepper())) return c.json({ error: "kyc_reverify" }, 403);
       // An account mid-recovery: whoever ends up holding it gets the money, not now.
       if (await payoutsPausedByRecovery(db, user.sub)) return c.json({ error: "recovery_hold" }, 409);
+      // Real money needs a real destination (3H): a Paystack deal pays to a saved account.
+      const [rail] = await db<{ payment_provider: string | null }[]>`select payment_provider from public.deals where id = ${id}`;
+      if (rail?.payment_provider === "paystack") {
+        const [acct] = await db<{ provider: string }[]>`select provider from public.payout_accounts where user_id = ${user.sub}`;
+        if (acct?.provider !== "paystack") return c.json({ error: "no_payout_account" }, 409);
+      }
 
       const [bal] = await db<{ s: string }[]>`
         select coalesce(sum(amount_kobo), 0)::bigint as s from public.ledger_entries
@@ -242,6 +248,21 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
             select part, status from public.payouts where deal_id = ${id} order by part for update
           `;
           if (prior.some((p) => p.status === "pending")) return null;
+          // A transfer that failed (bad account, bank down): try that payout again,
+          // to the account as it is now, under a fresh transfer reference.
+          const failed = prior.find((p) => p.status === "failed");
+          if (failed) {
+            const [po] = await sql<PayoutRow[]>`
+              update public.payouts set status = 'pending', amount_kobo = ${amount}, transfer_reference = null
+              where deal_id = ${id} and part = ${failed.part}
+              returning id, deal_id, seller_id, amount_kobo, status, created_at, settled_at
+            `;
+            await sql`
+              insert into public.outbox (topic, payload, deal_id)
+              values ('escrow.payout', ${sql.json({ dealId: id, amount, sellerId: user.sub, part: failed.part })}, ${id})
+            `;
+            return po!;
+          }
           if (prior.length && !staged) return null;
           const part = prior.length;
           const [po] = await sql<PayoutRow[]>`

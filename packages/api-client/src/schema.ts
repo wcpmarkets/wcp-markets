@@ -3279,6 +3279,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Could not open a Paystack checkout (deal left ACCEPTED) */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Database unavailable */
                 503: {
                     headers: {
@@ -4426,8 +4435,280 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Not payable / already requested / recovery_hold (account recovery in progress) */
+                /** @description Not payable / already requested / recovery_hold (account recovery in progress) / no_payout_account */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/banks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Banks a payout can go to */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Banks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Banks"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Paystack unavailable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/payout-account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My payout account (null if not set) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Account */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PayoutAccountResult"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /** Save (or replace) my payout account */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["SavePayoutAccountRequest"];
+                };
+            };
+            responses: {
+                /** @description Saved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PayoutAccountResult"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description payout_pending — wait for the payout in flight */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description account_not_found / unknown_bank */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many lookups */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Paystack unavailable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/payout-account/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Look up the name on a bank account (to confirm before saving) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ResolveAccountRequest"];
+                };
+            };
+            responses: {
+                /** @description Resolved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ResolveAccountResult"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description account_not_found */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many lookups */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Paystack unavailable */
+                502: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5846,6 +6127,28 @@ export interface components {
             status: "proposed" | "held" | "releasing" | "released" | "refunding" | "refunded";
             releasedAt?: string;
         };
+        PaymentQuote: {
+            /** @enum {string} */
+            rail: "mock" | "paystack";
+            /** Format: int64 */
+            principalKobo: number;
+            /** Format: int64 */
+            buyerFeeKobo: number;
+            /** Format: int64 */
+            processingFeeKobo: number;
+            /** Format: int64 */
+            totalKobo: number;
+        };
+        Checkout: {
+            reference: string;
+            authorizationUrl: string;
+            accessCode: string;
+            /** Format: int64 */
+            totalKobo: number;
+            /** Format: int64 */
+            processingFeeKobo: number;
+            expiresAt: string;
+        };
         Deal: {
             /** Format: uuid */
             id: string;
@@ -5865,6 +6168,8 @@ export interface components {
             qty: number;
             terms?: components["schemas"]["DealTerms"];
             milestones?: components["schemas"]["DealMilestone"][];
+            payment?: components["schemas"]["PaymentQuote"];
+            checkout?: components["schemas"]["Checkout"];
             createdAt: string;
             updatedAt: string;
         };
@@ -6024,6 +6329,34 @@ export interface components {
             status: "pending" | "settled" | "failed";
             createdAt: string;
             settledAt: string | null;
+        };
+        Bank: {
+            code: string;
+            name: string;
+        };
+        Banks: {
+            banks: components["schemas"]["Bank"][];
+        };
+        PayoutAccount: {
+            bankCode: string;
+            bankName: string;
+            accountLast4: string;
+            accountName: string;
+            updatedAt: string;
+        } | null;
+        PayoutAccountResult: {
+            account: components["schemas"]["PayoutAccount"];
+        };
+        ResolveAccountResult: {
+            accountName: string;
+        };
+        ResolveAccountRequest: {
+            bankCode: string;
+            accountNumber: string;
+        };
+        SavePayoutAccountRequest: {
+            bankCode: string;
+            accountNumber: string;
         };
         RecoveryOption: {
             id: string;

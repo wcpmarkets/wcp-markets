@@ -1,5 +1,7 @@
 import { MockEscrowProvider } from "@wcp/escrow";
 import { fetchSsm } from "./secrets.js";
+import { getDb } from "./db.js";
+import { dealRail, refundLatePayment, requestRefund, requestTransfer } from "./money/paystack-ops.js";
 
 /**
  * The escrow orchestrator — an SQS consumer on the deal-events queue (fed by the
@@ -33,9 +35,29 @@ export const handler = async (event: SqsEvent) => {
         amount?: number;
         payout?: number;
         part?: number; // a staged job's stage / a deal's nth payout
+        sellerId?: string;
+        reference?: string;
       };
       const part = msg.part || undefined;
       const suffix = part ? `:${part}` : "";
+      // Paystack deals (3H): refunds and payouts are real Paystack calls, settled by
+      // Paystack's own webhooks. Releases stay internal (the money never leaves WCP's
+      // balance), so they take the self-webhook path below like the mock.
+      if (msg.topic === "paystack.refund_late") {
+        await refundLatePayment(await needDb(), { dealId: msg.dealId, reference: msg.reference!, amountKobo: msg.amount! });
+        continue;
+      }
+      if (msg.topic === "escrow.refund" || msg.topic === "escrow.payout") {
+        const db = await needDb();
+        if ((await dealRail(db, msg.dealId)) === "paystack") {
+          if (msg.topic === "escrow.refund") await requestRefund(db, { dealId: msg.dealId, amountKobo: msg.amount!, part });
+          else {
+            const sellerId = msg.sellerId ?? (await db<{ seller_id: string }[]>`select seller_id from public.deals where id = ${msg.dealId}`)[0]!.seller_id;
+            await requestTransfer(db, { dealId: msg.dealId, amountKobo: msg.amount!, sellerId, part });
+          }
+          continue;
+        }
+      }
       if (msg.topic === "escrow.create_hold") {
         const txn = await provider.createHold({
           dealId: msg.dealId,
@@ -103,6 +125,12 @@ export const handler = async (event: SqsEvent) => {
   }
   return { batchItemFailures };
 };
+
+async function needDb() {
+  const db = await getDb();
+  if (!db) throw new Error("[consumer] database unavailable (DATABASE_URL_SSM)");
+  return db;
+}
 
 async function postWebhook(apiUrl: string, wh: { body: string; signature: string }) {
   const res = await fetch(`${apiUrl}/webhooks/escrow`, {

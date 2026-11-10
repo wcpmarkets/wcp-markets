@@ -47,3 +47,39 @@ export const stageSellerFees = (amounts: readonly number[]): number[] => {
     return fee;
   });
 };
+
+/**
+ * Paystack's local-card/transfer fee on a GROSS charge: 1.5% + ₦100, the ₦100 waived
+ * under ₦2,500, the whole fee capped at ₦2,000. Rounded UP (we never under-collect).
+ */
+export const PAYSTACK_PCT_BPS = 150;
+export const PAYSTACK_FLAT_KOBO = 10_000;
+export const PAYSTACK_FLAT_WAIVED_BELOW_KOBO = 250_000;
+export const PAYSTACK_CAP_KOBO = 200_000;
+export const paystackFeeKobo = (gross: number): number =>
+  Math.min(
+    Math.ceil((gross * PAYSTACK_PCT_BPS) / 10_000) + (gross >= PAYSTACK_FLAT_WAIVED_BELOW_KOBO ? PAYSTACK_FLAT_KOBO : 0),
+    PAYSTACK_CAP_KOBO,
+  );
+
+/**
+ * The buyer pays Paystack's fee (decided 2026-11-10): the processing line that, added
+ * to `net` (principal + WCP buyer fee), leaves exactly `net` after Paystack takes its
+ * cut — the smallest gross G with G − paystackFee(G) ≥ net. Closed forms for the three
+ * fee regimes, then a few kobo of nudging for rounding.
+ */
+export const processingFeeKobo = (net: number): number => {
+  const candidates = [
+    Math.ceil((net * 10_000) / (10_000 - PAYSTACK_PCT_BPS)), // under ₦2,500: no flat
+    Math.ceil(((net + PAYSTACK_FLAT_KOBO) * 10_000) / (10_000 - PAYSTACK_PCT_BPS)), // flat applies
+    net + PAYSTACK_CAP_KOBO, // capped
+  ];
+  let best = Infinity;
+  for (let g of candidates) {
+    for (let i = 0; i < 5 && g - paystackFeeKobo(g) < net; i++) g++;
+    if (g - paystackFeeKobo(g) >= net) best = Math.min(best, g);
+  }
+  // Below the flat threshold the first candidate can land just past ₦2,500, where the
+  // flat kicks in; the others cover that, so `best` is always finite.
+  return best - net;
+};

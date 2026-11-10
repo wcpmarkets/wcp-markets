@@ -91,6 +91,11 @@ resource "aws_lambda_function" "api" {
       # Termii key for security SMS. Until the parameter exists, SMS is mocked (logged
       # to public.sms_log as 'mocked') — creating it needs no redeploy, only a cold start.
       TERMII_API_KEY_SSM = "/wcp/api/termii-api-key"
+      # Phase 3 H. Paystack secret key (sk_test_… / sk_live_…). Until the parameter
+      # exists every deal stays on the mock rail; creating it needs only a cold start.
+      PAYSTACK_SECRET_KEY_SSM = "/wcp/api/paystack-secret-key"
+      # Paystack's checkout returns the browser here (/payments/paystack/return).
+      PUBLIC_API_URL = aws_apigatewayv2_api.http.api_endpoint
     }
   }
 
@@ -248,6 +253,9 @@ resource "aws_lambda_function" "sweeper" {
       # Termii key for security SMS. Until the parameter exists, SMS is mocked (logged
       # to public.sms_log as 'mocked') — creating it needs no redeploy, only a cold start.
       TERMII_API_KEY_SSM = "/wcp/api/termii-api-key"
+      # Phase 3 H. Paystack secret key (sk_test_… / sk_live_…). Until the parameter
+      # exists every deal stays on the mock rail; creating it needs only a cold start.
+      PAYSTACK_SECRET_KEY_SSM = "/wcp/api/paystack-secret-key"
     }
   }
 
@@ -392,6 +400,9 @@ resource "aws_lambda_function" "consumer" {
     variables = {
       ESCROW_WEBHOOK_SECRET_SSM = "/wcp/api/escrow-webhook-secret"
       API_URL                   = aws_apigatewayv2_api.http.api_endpoint
+      # Phase 3 H: Paystack refunds/transfers are recorded against the deal.
+      DATABASE_URL_SSM        = "/wcp/api/database-url"
+      PAYSTACK_SECRET_KEY_SSM = "/wcp/api/paystack-secret-key"
     }
   }
 

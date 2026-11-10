@@ -7,6 +7,8 @@ import {
 } from "./deals/sweeper.js";
 import { reconcileAndRecord } from "./money/reconcile.js";
 import { completeDueRecoveries } from "./recovery/service.js";
+import { expireStaleCheckouts } from "./money/checkout.js";
+import { paystackConfigured } from "./money/paystack.js";
 
 /**
  * The sweeper Lambda — invoked every 60s by EventBridge. Fires due deal deadlines
@@ -74,8 +76,17 @@ export const handler = async () => {
     console.error("[sweeper] completeDueRecoveries failed:", e);
   }
 
+  // Paystack checkouts left open past their TTL → verify, then confirm or give up.
+  let checkouts = { confirmed: 0, abandoned: 0 };
+  try {
+    if (await paystackConfigured()) checkouts = await expireStaleCheckouts(db);
+  } catch (e) {
+    errors.push(e);
+    console.error("[sweeper] expireStaleCheckouts failed:", e);
+  }
+
   console.log(
-    `[sweeper] recoveries completed=${recov.completed} failed=${recov.failed}; deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
+    `[sweeper] checkouts confirmed=${checkouts.confirmed} abandoned=${checkouts.abandoned}; recoveries completed=${recov.completed} failed=${recov.failed}; deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
       `skipped=${timers?.skipped ?? "?"} errored=${timers?.errored ?? "?"}; ` +
       `outbox relayed=${relay.relayed} failed=${relay.failed}; reconcile ${recon}`,
   );

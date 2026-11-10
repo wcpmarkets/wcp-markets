@@ -247,6 +247,9 @@ export const EFFECTS: Partial<Record<DealAction, Effect>> = {
   // Buyer initiates payment → ask the escrow orchestrator to create the hold. No
   // ledger yet (funds not captured until the provider confirms).
   pay: async (sql, { deal, seq }) => {
+    // Paystack: the route opens a checkout and Paystack's webhook confirms — there's
+    // no hold to ask an orchestrator for.
+    if (deal.payment_provider === "paystack") return;
     const principal = Number(deal.price_kobo);
     const fee = buyerFeeKobo(principal);
     await sql`

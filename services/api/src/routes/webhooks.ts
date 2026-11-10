@@ -5,6 +5,15 @@ import { getDb } from "../db.js";
 import { transition, type Sql } from "../deals/commands.js";
 import { settlePayout, settleRefund, settleRelease, settleStageRelease, settleStageReturn } from "../money/ledger.js";
 import { getEscrowProvider } from "../money/provider.js";
+import { verifyPaystackSignature } from "../money/paystack.js";
+import { handlePaystackEvent } from "../money/paystack-ops.js";
+
+const RETURN_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment received</title>
+<style>body{font-family:system-ui,sans-serif;background:#f6f5f1;color:#1d1d1b;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px;text-align:center}
+@media (prefers-color-scheme:dark){body{background:#151513;color:#eeece6}}</style></head>
+<body><main><h1 style="font-size:1.25rem">Thanks — we're confirming your payment</h1>
+<p>You can go back to the WCP Markets app. Your deal updates as soon as Paystack confirms.</p></main></body></html>`;
 
 /**
  * Escrow partner webhooks. A raw, signature-verified endpoint (NOT in the OpenAPI
@@ -76,4 +85,32 @@ export function registerWebhooks(app: OpenAPIHono<AuthEnv>) {
 
     return c.json({ ok: true }, 200);
   });
+
+  // ── Paystack (Phase 3 H) — signed by Paystack with our secret key ────────────
+  app.post("/webhooks/paystack", async (c) => {
+    const raw = await c.req.text();
+    if (!(await verifyPaystackSignature(raw, c.req.header("x-paystack-signature"))))
+      return c.json({ error: "bad_signature" }, 401);
+    let ev: { event: string; data: Record<string, unknown> };
+    try {
+      ev = JSON.parse(raw);
+    } catch {
+      return c.json({ error: "bad_json" }, 400);
+    }
+    if (!ev?.event || typeof ev.data !== "object" || !ev.data) return c.json({ ok: true }, 200);
+    const db = await getDb();
+    if (!db) return c.json({ error: "db_unavailable" }, 503);
+    try {
+      await handlePaystackEvent(db, ev);
+    } catch (e) {
+      // A transient failure (DB): 500 makes Paystack retry. Handlers are idempotent.
+      console.error(`[webhook] paystack ${ev.event} failed:`, e);
+      return c.json({ error: "retry" }, 500);
+    }
+    return c.json({ ok: true }, 200);
+  });
+
+  // Where Paystack sends the buyer's browser after checkout. The app's WebView closes
+  // on this URL; a browser shows a short note. Confirmation is the webhook, not this.
+  app.get("/payments/paystack/return", (c) => c.html(RETURN_PAGE));
 }

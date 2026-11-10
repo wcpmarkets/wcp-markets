@@ -2,6 +2,8 @@ import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { auth, type AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import { createOffer, transition, type DealRow, type DealTerms, type Sql } from "../deals/commands.js";
+import { CHECKOUT_TTL_MIN, openCheckout, quote, railFor, type Rail } from "../money/checkout.js";
+import { PaystackError } from "../money/paystack.js";
 import { rescaleStages, stageProblem, MAX_STAGES, type StageRow } from "../deals/stages.js";
 import { isBlockedEitherWay } from "../profiles/summary.js";
 
@@ -83,6 +85,30 @@ const DealSchema = z
     terms: DealTermsSchema.optional(),
     /** A staged job's stages with their money status (absent when unstaged). */
     milestones: z.array(DealMilestoneSchema).optional(),
+    /** The buyer's price breakdown while the deal awaits payment (absent otherwise). */
+    payment: z
+      .object({
+        rail: z.enum(["mock", "paystack"]),
+        principalKobo: z.number().int(),
+        buyerFeeKobo: z.number().int(),
+        /** Paystack's cut, paid by the buyer (0 on the mock rail). Not refunded. */
+        processingFeeKobo: z.number().int(),
+        totalKobo: z.number().int(),
+      })
+      .openapi("PaymentQuote")
+      .optional(),
+    /** An open Paystack checkout (buyer, PAYMENT_PENDING): open authorizationUrl to pay. */
+    checkout: z
+      .object({
+        reference: z.string(),
+        authorizationUrl: z.string(),
+        accessCode: z.string(),
+        totalKobo: z.number().int(),
+        processingFeeKobo: z.number().int(),
+        expiresAt: z.string(),
+      })
+      .openapi("Checkout")
+      .optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -167,7 +193,35 @@ async function dealsOut(db: Sql, deals: DealRow[], uid: string): Promise<DealOut
   const rows = ids.length
     ? await db<StageRow[]>`select * from public.deal_milestones where deal_id = any(${ids}::uuid[]) order by idx`
     : [];
-  return deals.map((d) => ({ ...toDeal(d, uid), milestones: milestonesOf(d, rows.filter((r) => r.deal_id === d.id)) }));
+  // The buyer's breakdown while payment is due; the open checkout once it's pending.
+  const due = deals.filter((d) => d.buyer_id === uid && (d.state === "ACCEPTED" || d.state === "PAYMENT_PENDING"));
+  let myRail: Rail | undefined;
+  const payments = new Map<string, NonNullable<DealOut["payment"]>>();
+  const checkouts = new Map<string, NonNullable<DealOut["checkout"]>>();
+  for (const d of due) {
+    const rail = d.payment_provider ?? (myRail ??= await railFor(db, uid));
+    payments.set(d.id, quote(rail, Number(d.price_kobo)));
+  }
+  const pendingIds = due.filter((d) => d.state === "PAYMENT_PENDING" && d.payment_provider === "paystack").map((d) => d.id);
+  if (pendingIds.length) {
+    const open = await db<{ deal_id: string; reference: string; authorization_url: string; access_code: string; gross_kobo: string; processing_fee_kobo: string; created_at: Date }[]>`
+      select distinct on (deal_id) deal_id, reference, authorization_url, access_code, gross_kobo, processing_fee_kobo, created_at
+      from public.payments
+      where deal_id = any(${pendingIds}::uuid[]) and status = 'initialized' and authorization_url is not null
+        and created_at > now() - make_interval(mins => ${CHECKOUT_TTL_MIN - 5})
+      order by deal_id, created_at desc`;
+    for (const p of open) checkouts.set(p.deal_id, {
+      reference: p.reference, authorizationUrl: p.authorization_url, accessCode: p.access_code,
+      totalKobo: Number(p.gross_kobo), processingFeeKobo: Number(p.processing_fee_kobo),
+      expiresAt: new Date(p.created_at.getTime() + CHECKOUT_TTL_MIN * 60_000).toISOString(),
+    });
+  }
+  return deals.map((d) => ({
+    ...toDeal(d, uid),
+    milestones: milestonesOf(d, rows.filter((r) => r.deal_id === d.id)),
+    payment: payments.get(d.id),
+    checkout: checkouts.get(d.id),
+  }));
 }
 const dealOut = async (db: Sql, d: DealRow, uid: string) => (await dealsOut(db, [d], uid))[0]!;
 
@@ -414,9 +468,11 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
     },
   );
 
-  // ── POST /deals/{id}/pay — buyer pays an accepted offer (M4) ────────────────
-  // Moves ACCEPTED → PAYMENT_PENDING and enqueues an escrow hold (the EFFECTS seam).
-  // The provider confirms asynchronously via webhook → PAID_IN_ESCROW. Mock for now.
+  // ── POST /deals/{id}/pay — buyer pays an accepted offer (M4, 3H) ─────────────
+  // Moves ACCEPTED → PAYMENT_PENDING. Paystack: opens a checkout (returned as
+  // `checkout`; the app opens its authorizationUrl) and Paystack's webhook confirms →
+  // PAID_IN_ESCROW. Calling again while pending returns the open checkout (or a fresh
+  // one). Mock rail (test accounts / no key): enqueues the mock hold, as before.
   app.openapi(
     createRoute({
       method: "post",
@@ -430,6 +486,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         200: { description: "Payment initiated", content: { "application/json": { schema: DealSchema } } },
         401: { description: "Unauthorized" },
         404: { description: "Not found" },
+        502: { description: "Could not open a Paystack checkout (deal left ACCEPTED)", content: { "application/json": { schema: ErrorSchema } } },
         409: { description: "Not payable in this state", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
@@ -439,13 +496,33 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const { id } = c.req.valid("param");
-      const [deal] = await db<{ buyer_id: string; seller_id: string }[]>`
-        select buyer_id, seller_id from public.deals where id = ${id}
+      const [deal] = await db<{ buyer_id: string; state: string; payment_provider: string | null }[]>`
+        select buyer_id, state, payment_provider from public.deals where id = ${id}
       `;
-      if (!deal || (deal.buyer_id !== user.sub && deal.seller_id !== user.sub))
-        return c.json({ error: "not_found" }, 404);
-      // Only the buyer pays.
-      if (deal.buyer_id !== user.sub) return c.json({ error: "not_found" }, 404);
+      // Only the buyer pays (a seller sees the same 404 as a stranger).
+      if (!deal || deal.buyer_id !== user.sub) return c.json({ error: "not_found" }, 404);
+
+      const checkoutFor = async () => {
+        try {
+          return { ok: true as const, checkout: await openCheckout(db, id, user.sub) };
+        } catch (e) {
+          console.error("[pay] checkout failed:", e instanceof PaystackError ? `${e.status} ${e.message}` : e);
+          return { ok: false as const };
+        }
+      };
+
+      // Already pending on Paystack (the buyer closed the checkout): hand it back.
+      if (deal.state === "PAYMENT_PENDING" && deal.payment_provider === "paystack") {
+        const co = await checkoutFor();
+        if (!co.ok) return c.json({ error: "payment_unavailable" }, 502);
+        const [row] = await db<DealRow[]>`select * from public.deals where id = ${id}`;
+        return c.json({ ...(await dealOut(db, row!, user.sub)), checkout: co.checkout }, 200);
+      }
+
+      // Choose the rail before the transition, so the pay effect knows whether to
+      // enqueue a mock hold. Only an ACCEPTED deal is re-railed.
+      const rail = await railFor(db, user.sub);
+      await db`update public.deals set payment_provider = ${rail} where id = ${id} and state = 'ACCEPTED'`;
 
       const r = await transition(db, {
         dealId: id,
@@ -458,7 +535,16 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
         return c.json({ error: r.code === "illegal" ? "not_payable" : "conflict" }, 409);
       }
-      return c.json(await dealOut(db, r.deal, user.sub), 200);
+      if (r.deal.payment_provider !== "paystack") return c.json(await dealOut(db, r.deal, user.sub), 200);
+
+      const co = await checkoutFor();
+      if (!co.ok) {
+        // Couldn't open a checkout: put the deal back so the buyer can try again.
+        await transition(db, { dealId: id, actor: "SYSTEM", action: "payment_failed", idempotencyKey: `checkout-failed:${r.deal.state_token}` });
+        return c.json({ error: "payment_unavailable" }, 502);
+      }
+      const [row] = await db<DealRow[]>`select * from public.deals where id = ${id}`;
+      return c.json({ ...(await dealOut(db, row!, user.sub)), checkout: co.checkout }, 200);
     },
   );
 

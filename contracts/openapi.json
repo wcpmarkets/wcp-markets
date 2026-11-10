@@ -2534,6 +2534,74 @@
           "status"
         ]
       },
+      "PaymentQuote": {
+        "type": "object",
+        "properties": {
+          "rail": {
+            "type": "string",
+            "enum": [
+              "mock",
+              "paystack"
+            ]
+          },
+          "principalKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "buyerFeeKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "processingFeeKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalKobo": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "rail",
+          "principalKobo",
+          "buyerFeeKobo",
+          "processingFeeKobo",
+          "totalKobo"
+        ]
+      },
+      "Checkout": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "authorizationUrl": {
+            "type": "string"
+          },
+          "accessCode": {
+            "type": "string"
+          },
+          "totalKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "processingFeeKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expiresAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference",
+          "authorizationUrl",
+          "accessCode",
+          "totalKobo",
+          "processingFeeKobo",
+          "expiresAt"
+        ]
+      },
       "Deal": {
         "type": "object",
         "properties": {
@@ -2584,6 +2652,12 @@
             "items": {
               "$ref": "#/components/schemas/DealMilestone"
             }
+          },
+          "payment": {
+            "$ref": "#/components/schemas/PaymentQuote"
+          },
+          "checkout": {
+            "$ref": "#/components/schemas/Checkout"
           },
           "createdAt": {
             "type": "string"
@@ -3281,6 +3355,123 @@
           "status",
           "createdAt",
           "settledAt"
+        ]
+      },
+      "Bank": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ]
+      },
+      "Banks": {
+        "type": "object",
+        "properties": {
+          "banks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bank"
+            }
+          }
+        },
+        "required": [
+          "banks"
+        ]
+      },
+      "PayoutAccount": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "bankCode": {
+            "type": "string"
+          },
+          "bankName": {
+            "type": "string"
+          },
+          "accountLast4": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bankCode",
+          "bankName",
+          "accountLast4",
+          "accountName",
+          "updatedAt"
+        ]
+      },
+      "PayoutAccountResult": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/PayoutAccount"
+          }
+        },
+        "required": [
+          "account"
+        ]
+      },
+      "ResolveAccountResult": {
+        "type": "object",
+        "properties": {
+          "accountName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountName"
+        ]
+      },
+      "ResolveAccountRequest": {
+        "type": "object",
+        "properties": {
+          "bankCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "accountNumber": {
+            "type": "string",
+            "pattern": "^\\d{10}$"
+          }
+        },
+        "required": [
+          "bankCode",
+          "accountNumber"
+        ]
+      },
+      "SavePayoutAccountRequest": {
+        "type": "object",
+        "properties": {
+          "bankCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "accountNumber": {
+            "type": "string",
+            "pattern": "^\\d{10}$"
+          }
+        },
+        "required": [
+          "bankCode",
+          "accountNumber"
         ]
       },
       "RecoveryOption": {
@@ -7152,6 +7343,16 @@
               }
             }
           },
+          "502": {
+            "description": "Could not open a Paystack checkout (deal left ACCEPTED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Database unavailable",
             "content": {
@@ -8206,7 +8407,7 @@
             "description": "Not found"
           },
           "409": {
-            "description": "Not payable / already requested / recovery_hold (account recovery in progress)",
+            "description": "Not payable / already requested / recovery_hold (account recovery in progress) / no_payout_account",
             "content": {
               "application/json": {
                 "schema": {
@@ -8264,6 +8465,254 @@
           },
           "404": {
             "description": "No payout"
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/banks": {
+      "get": {
+        "summary": "Banks a payout can go to",
+        "tags": [
+          "payouts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Banks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Banks"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "502": {
+            "description": "Paystack unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/payout-account": {
+      "get": {
+        "summary": "My payout account (null if not set)",
+        "tags": [
+          "payouts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutAccountResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save (or replace) my payout account",
+        "tags": [
+          "payouts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePayoutAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutAccountResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "payout_pending — wait for the payout in flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "account_not_found / unknown_bank",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many lookups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Paystack unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/payout-account/resolve": {
+      "post": {
+        "summary": "Look up the name on a bank account (to confirm before saving)",
+        "tags": [
+          "payouts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveAccountResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "422": {
+            "description": "account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many lookups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Paystack unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "503": {
             "description": "Database unavailable",
