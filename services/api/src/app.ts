@@ -16,6 +16,8 @@ import { registerViewings } from "./routes/viewings.js";
 import { registerServices } from "./routes/services.js";
 import { registerBookings } from "./routes/bookings.js";
 import { registerAttachments } from "./routes/attachments.js";
+import { registerRecovery } from "./routes/recovery.js";
+import { registerSessions } from "./routes/sessions.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -150,6 +152,10 @@ export function createApp() {
 
   // ── KYC + payouts (M8 — payout-gated on L2) ───────────────────────────────
   registerKyc(app);
+
+  // ── Account recovery + signed-in devices (Phase 3 G) ──────────────────────
+  registerRecovery(app);
+  registerSessions(app);
 
   // ── Escrow webhooks (M4) — raw signed endpoint, not in the client contract ──
   registerWebhooks(app);

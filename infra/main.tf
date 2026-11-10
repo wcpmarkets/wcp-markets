@@ -86,6 +86,11 @@ resource "aws_lambda_function" "api" {
       SUPABASE_SECRET_KEY_SSM = "/wcp/api/supabase-secret-key"
       # HMAC secret for verifying escrow-partner (Mock) webhook signatures.
       ESCROW_WEBHOOK_SECRET_SSM = "/wcp/api/escrow-webhook-secret"
+      # Phase 3 G. Pepper for the keyed BVN/NIN hash (account recovery re-match).
+      KYC_ID_PEPPER_SSM = "/wcp/api/kyc-id-pepper"
+      # Termii key for security SMS. Until the parameter exists, SMS is mocked (logged
+      # to public.sms_log as 'mocked') — creating it needs no redeploy, only a cold start.
+      TERMII_API_KEY_SSM = "/wcp/api/termii-api-key"
     }
   }
 
@@ -238,6 +243,11 @@ resource "aws_lambda_function" "sweeper" {
     variables = {
       DATABASE_URL_SSM = "/wcp/api/database-url"
       OUTBOX_QUEUE_URL = aws_sqs_queue.deal_events.url
+      # Phase 3 G. Pepper for the keyed BVN/NIN hash (account recovery re-match).
+      KYC_ID_PEPPER_SSM = "/wcp/api/kyc-id-pepper"
+      # Termii key for security SMS. Until the parameter exists, SMS is mocked (logged
+      # to public.sms_log as 'mocked') — creating it needs no redeploy, only a cold start.
+      TERMII_API_KEY_SSM = "/wcp/api/termii-api-key"
     }
   }
 
@@ -296,7 +306,7 @@ resource "aws_cloudwatch_metric_alarm" "sweeper_errors" {
   threshold           = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
   treat_missing_data  = "notBreaching"
-  alarm_description    = "Sweeper Lambda threw — a timer/relay run failed."
+  alarm_description   = "Sweeper Lambda threw — a timer/relay run failed."
   alarm_actions       = [aws_sns_topic.alerts.arn]
   ok_actions          = [aws_sns_topic.alerts.arn]
 }
@@ -315,7 +325,7 @@ resource "aws_cloudwatch_metric_alarm" "sweeper_not_running" {
   threshold           = 1
   comparison_operator = "LessThanThreshold"
   treat_missing_data  = "breaching"
-  alarm_description    = "Sweeper has not run in 5 minutes — escrow timers are frozen."
+  alarm_description   = "Sweeper has not run in 5 minutes — escrow timers are frozen."
   alarm_actions       = [aws_sns_topic.alerts.arn]
   ok_actions          = [aws_sns_topic.alerts.arn]
 }

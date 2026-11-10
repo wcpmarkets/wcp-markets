@@ -5,9 +5,10 @@ import {
   decodeProtectedHeader,
   type JWTPayload,
 } from "jose";
+import { getDb } from "../db.js";
 
 /** The authenticated caller, derived from a verified Supabase JWT. */
-export type AuthUser = { sub: string; phone: string | null };
+export type AuthUser = { sub: string; phone: string | null; sessionId: string | null };
 
 export type AuthEnv = { Variables: { user: AuthUser } };
 
@@ -58,10 +59,45 @@ export async function verifyAccessToken(token: string): Promise<AuthUser | null>
     }
     const sub = payload.sub;
     if (typeof sub !== "string") return null;
-    return { sub, phone: readPhone(payload) };
+    const sessionId = typeof payload.session_id === "string" ? payload.session_id : null;
+    if (!(await sessionAlive(sub, sessionId))) return null;
+    return { sub, phone: readPhone(payload), sessionId };
   } catch {
     return null;
   }
+}
+
+/**
+ * A signed JWT outlives the session it came from (up to its 1h expiry). "Sign out
+ * other devices" and an account-recovery transfer delete rows from auth.sessions, so
+ * the API checks the token's session still exists — otherwise a revoked phone keeps
+ * working until its token expires. Cached ~30s per warm Lambda (a revoke takes at most
+ * that long to bite). No DB (local dev) or no session_id claim (legacy/test tokens) →
+ * not checked.
+ */
+const SESSION_TTL_MS = 30_000;
+const sessionCache = new Map<string, number>(); // session id → alive-until (ms)
+async function sessionAlive(sub: string, sessionId: string | null): Promise<boolean> {
+  if (!sessionId) return true;
+  const until = sessionCache.get(sessionId);
+  if (until && until > Date.now()) return true;
+  const db = await getDb();
+  if (!db) return true;
+  const [row] = await db`
+    select 1 from auth.sessions
+    where id = ${sessionId} and user_id = ${sub} and (not_after is null or not_after > now())`;
+  if (!row) {
+    sessionCache.delete(sessionId);
+    return false;
+  }
+  if (sessionCache.size > 5000) sessionCache.clear();
+  sessionCache.set(sessionId, Date.now() + SESSION_TTL_MS);
+  return true;
+}
+
+/** Forget a session at once (this Lambda's cache) — after the caller revokes it. */
+export function forgetSession(sessionId: string): void {
+  sessionCache.delete(sessionId);
 }
 
 export const auth = createMiddleware<AuthEnv>(async (c, next) => {

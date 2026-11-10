@@ -196,7 +196,9 @@ async function ensureProfile(db: Sql, user: AuthUser): Promise<ProfileRow> {
     on conflict (id) do update
       set updated_at = now(),
           last_seen_at = now(),
-          phone = coalesce(public.profiles.phone, ${user.phone})
+          -- The token is the truth: a number changed via Supabase (phone_change) or moved
+          -- by account recovery shows up here on the next request.
+          phone = coalesce(${user.phone}, public.profiles.phone)
     returning ${db.unsafe(PROFILE_COLS)}
   `;
   return rows[0]!;

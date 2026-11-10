@@ -6,6 +6,7 @@ import {
   type FireResult,
 } from "./deals/sweeper.js";
 import { reconcileAndRecord } from "./money/reconcile.js";
+import { completeDueRecoveries } from "./recovery/service.js";
 
 /**
  * The sweeper Lambda — invoked every 60s by EventBridge. Fires due deal deadlines
@@ -64,8 +65,17 @@ export const handler = async () => {
     console.error("[sweeper] reconcile failed:", e);
   }
 
+  // Account recoveries whose 24h hold has run out → transfer (one tx each).
+  let recov = { completed: 0, failed: 0 };
+  try {
+    recov = await completeDueRecoveries(db);
+  } catch (e) {
+    errors.push(e);
+    console.error("[sweeper] completeDueRecoveries failed:", e);
+  }
+
   console.log(
-    `[sweeper] deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
+    `[sweeper] recoveries completed=${recov.completed} failed=${recov.failed}; deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
       `skipped=${timers?.skipped ?? "?"} errored=${timers?.errored ?? "?"}; ` +
       `outbox relayed=${relay.relayed} failed=${relay.failed}; reconcile ${recon}`,
   );

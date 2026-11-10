@@ -5,6 +5,8 @@ import { rateLimit, clientIp } from "../middleware/rate-limit.js";
 import { getDb } from "../db.js";
 import { getKycProvider } from "../kyc/provider.js";
 import { createSignedUploadUrl, deleteStorageObject } from "../supabase.js";
+import { hasPepper, idHash } from "../kyc/idhash.js";
+import { payoutsPausedByRecovery } from "../recovery/service.js";
 
 // KYC verify is a match-oracle and (against real NIBSS) costs money per call — cap it
 // per user, falling back to IP if somehow unauthenticated.
@@ -123,17 +125,22 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       `;
       // The number goes to the provider IN MEMORY and is NEVER stored.
       const result = await getKycProvider().verifyIdentity({ idType: b.idType, idNumber: b.idNumber, selfiePath: b.selfiePath });
+      // …and a keyed hash of it (never the number) so account recovery can re-match it.
+      const hash = result.matched ? await idHash(b.idType, b.idNumber) : null;
 
       // Never DOWNGRADE: a failed re-verify by an already-verified user is a no-op.
+      // (A matched re-verify by a verified user still writes — that's how a seller
+      // verified before hashes were kept gets one: the payout 403 kyc_reverify path.)
       const wrote = result.matched || !old?.matched;
       if (wrote) {
         await db.begin(async (sql) => {
           await sql`
-            insert into public.kyc_verifications (user_id, id_type, matched, level, selfie_path, provider_ref, updated_at)
-            values (${user.sub}, ${b.idType}, ${result.matched}, ${result.matched ? 2 : 1}, ${b.selfiePath ?? null}, ${result.providerRef}, now())
+            insert into public.kyc_verifications (user_id, id_type, matched, level, selfie_path, provider_ref, id_hash, updated_at)
+            values (${user.sub}, ${b.idType}, ${result.matched}, ${result.matched ? 2 : 1}, ${b.selfiePath ?? null}, ${result.providerRef}, ${hash}, now())
             on conflict (user_id) do update
               set id_type = excluded.id_type, matched = excluded.matched, level = excluded.level,
-                  selfie_path = excluded.selfie_path, provider_ref = excluded.provider_ref, updated_at = now()
+                  selfie_path = excluded.selfie_path, provider_ref = excluded.provider_ref,
+                  id_hash = coalesce(excluded.id_hash, public.kyc_verifications.id_hash), updated_at = now()
           `;
           if (result.matched) {
             await sql`
@@ -190,9 +197,9 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       responses: {
         201: { description: "Payout requested", content: { "application/json": { schema: PayoutSchema } } },
         401: { description: "Unauthorized" },
-        403: { description: "KYC (L2) required", content: { "application/json": { schema: ErrorSchema } } },
+        403: { description: "kyc_required (L2) / kyc_reverify (verify again once, for account recovery)", content: { "application/json": { schema: ErrorSchema } } },
         404: { description: "Not found" },
-        409: { description: "Not payable / already requested", content: { "application/json": { schema: ErrorSchema } } },
+        409: { description: "Not payable / already requested / recovery_hold (account recovery in progress)", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -213,6 +220,12 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       // The gate: no payout until the seller is L2-verified.
       const [prof] = await db<{ verification_level: number }[]>`select verification_level from public.profiles where id = ${user.sub}`;
       if ((prof?.verification_level ?? 1) < 2) return c.json({ error: "kyc_required" }, 403);
+      // Verified before ID hashes were kept: one re-verify, so a lost number can be
+      // recovered by ID rather than by an admin. Only once a pepper exists to hash with.
+      const [kh] = await db<{ id_hash: string | null }[]>`select id_hash from public.kyc_verifications where user_id = ${user.sub}`;
+      if (!kh?.id_hash && (await hasPepper())) return c.json({ error: "kyc_reverify" }, 403);
+      // An account mid-recovery: whoever ends up holding it gets the money, not now.
+      if (await payoutsPausedByRecovery(db, user.sub)) return c.json({ error: "recovery_hold" }, 409);
 
       const [bal] = await db<{ s: string }[]>`
         select coalesce(sum(amount_kobo), 0)::bigint as s from public.ledger_entries
