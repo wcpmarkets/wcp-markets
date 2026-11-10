@@ -70,6 +70,7 @@ export const DEAL_ACTIONS = [
   "hand_off",
   "confirm_receipt",
   "auto_release",
+  "release_stage", // a staged job: one stage released, more still held (redirected to by confirm/auto_release)
   "dispute",
   "respond", // seller responds to a dispute (stops the 24h clock; → awaiting admin)
   "resolve_release",
@@ -129,6 +130,13 @@ export const TRANSITIONS: readonly Transition[] = [
   { from: "PAID_IN_ESCROW", actor: "SYSTEM", action: "auto_refund", to: "REFUNDED", milestone: "M5" }, // hand-off SLA breach
   { from: "HANDED_OFF", actor: "BUYER", action: "confirm_receipt", to: "COMPLETED", milestone: "M5" },
   { from: "HANDED_OFF", actor: "SYSTEM", action: "auto_release", to: "COMPLETED", milestone: "M5" },
+  // Milestone escrow (22c-milestone): the provider marks a STAGE done (hand_off), the
+  // buyer confirms (or 48h passes) and that stage's money releases. While stages are
+  // still held the deal goes back to PAID_IN_ESCROW for the next one; the confirm /
+  // auto_release effect redirects here, so clients and the sweeper call the same
+  // actions they always have. The last stage takes the ordinary path to COMPLETED.
+  { from: "HANDED_OFF", actor: "BUYER", action: "release_stage", to: "PAID_IN_ESCROW", milestone: "M5" },
+  { from: "HANDED_OFF", actor: "SYSTEM", action: "release_stage", to: "PAID_IN_ESCROW", milestone: "M5" },
 
   // ── Disputes (M6) ─────────────────────────────────────────────────────────
   { from: "PAID_IN_ESCROW", actor: "BUYER", action: "dispute", to: "DISPUTED", milestone: "M6" },

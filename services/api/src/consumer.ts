@@ -32,7 +32,10 @@ export const handler = async (event: SqsEvent) => {
         dealId: string;
         amount?: number;
         payout?: number;
+        part?: number; // a staged job's stage / a deal's nth payout
       };
+      const part = msg.part || undefined;
+      const suffix = part ? `:${part}` : "";
       if (msg.topic === "escrow.create_hold") {
         const txn = await provider.createHold({
           dealId: msg.dealId,
@@ -63,7 +66,8 @@ export const handler = async (event: SqsEvent) => {
         const txn = await provider.releaseToSeller({
           dealId: msg.dealId,
           amountKobo: msg.payout!,
-          idempotencyKey: `release:${msg.dealId}`,
+          idempotencyKey: `release:${msg.dealId}${suffix}`,
+          part,
         });
         await postWebhook(apiUrl, provider.buildWebhook({
           eventId: `${txn.providerRef}:settled`,
@@ -71,12 +75,14 @@ export const handler = async (event: SqsEvent) => {
           providerRef: txn.providerRef,
           dealId: msg.dealId,
           amountKobo: msg.payout!,
+          part,
         }));
       } else if (msg.topic === "escrow.payout") {
         const txn = await provider.payoutToSeller({
           dealId: msg.dealId,
           amountKobo: msg.amount!,
-          idempotencyKey: `payout:${msg.dealId}`,
+          idempotencyKey: `payout:${msg.dealId}${suffix}`,
+          part,
         });
         await postWebhook(apiUrl, provider.buildWebhook({
           eventId: `${txn.providerRef}:settled`,
@@ -84,6 +90,7 @@ export const handler = async (event: SqsEvent) => {
           providerRef: txn.providerRef,
           dealId: msg.dealId,
           amountKobo: msg.amount!,
+          part,
         }));
       }
       // else: not an escrow command — ack (delete) without action.

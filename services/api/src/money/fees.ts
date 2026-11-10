@@ -27,3 +27,23 @@ export const sellerFeeKobo = (principal: number): number =>
 /** The seller's net payout = principal − sellerFee, computed as the residual so the
  * fee + payout ALWAYS sum to exactly the principal (no stray rounding kobo). */
 export const sellerPayoutKobo = (principal: number): number => principal - sellerFeeKobo(principal);
+
+/**
+ * A staged (milestone) job's seller fee, split across its stages. The TOTAL fee is
+ * the ordinary fee on the whole principal (so staging never changes what anyone pays);
+ * each stage carries its share, allocated on the cumulative amount so the shares sum
+ * to the total exactly — fee_k = round(F·cum_k/P) − round(F·cum_{k-1}/P).
+ */
+export const stageSellerFees = (amounts: readonly number[]): number[] => {
+  const principal = amounts.reduce((a, b) => a + b, 0);
+  const total = sellerFeeKobo(principal);
+  let cum = 0;
+  let prev = 0;
+  return amounts.map((a) => {
+    cum += a;
+    const upTo = principal === 0 ? 0 : Math.round((total * cum) / principal);
+    const fee = upTo - prev;
+    prev = upTo;
+    return fee;
+  });
+};

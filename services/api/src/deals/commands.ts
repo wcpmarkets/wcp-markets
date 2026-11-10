@@ -8,6 +8,7 @@ import {
   nextState,
 } from "./machine.js";
 import { EFFECTS } from "./effects.js";
+import type { StagePlan } from "./stages.js";
 
 /**
  * The deal command handler — the deterministic transactional core. Every command
@@ -39,7 +40,13 @@ export type DealRow = {
   updated_at: string | Date;
 };
 
-export type DealTerms = { service: string; scope?: string | null; startsAt?: string | null };
+export type DealTerms = {
+  service: string;
+  scope?: string | null;
+  startsAt?: string | null;
+  /** A staged quote's plan (stages.ts) — materialised into deal_milestones on funding. */
+  milestones?: StagePlan[];
+};
 
 export type CommandResult =
   | { ok: true; deal: DealRow; replay?: boolean }
@@ -86,6 +93,19 @@ async function syncDeadline(
     if (NEGOTIATION.includes(state)) hours = SERVICE_NEGOTIATION_HOURS;
     if (state === "PAID_IN_ESCROW" && terms.startsAt) {
       from = sql`greatest(now(), ${new Date(terms.startsAt)}::timestamptz)`;
+    }
+    // A staged job back in escrow after a stage released is work in progress, not a
+    // no-show: the "hand off within 72h or refund" clock only guards the first stage.
+    // Later stalls are the buyer's to raise (dispute), never an automatic refund of a
+    // job that's half done.
+    if (state === "PAID_IN_ESCROW" && terms.milestones?.length) {
+      const [moved] = await sql`
+        select 1 from public.deal_milestones where deal_id = ${dealId} and status <> 'held' limit 1
+      `;
+      if (moved) {
+        await sql`delete from public.deal_deadlines where deal_id = ${dealId}`;
+        return;
+      }
     }
   }
   await sql`
@@ -166,6 +186,14 @@ export async function createQuote(
     `;
     if (!req) return { ok: false, code: "request_not_found" };
     if (req.status !== "open") return { ok: false, code: "request_closed" };
+    // Only a fresh brief, or one whose last quote lapsed or was turned down, takes a
+    // quote: a request whose job was paid for is history — a repeat job is a new request.
+    if (req.deal_id) {
+      const [prior] = await sql<{ state: string }[]>`select state from public.deals where id = ${req.deal_id}`;
+      if (prior && !["DECLINED", "WITHDRAWN", "EXPIRED"].includes(prior.state)) {
+        return { ok: false, code: prior.state === "COMPLETED" || prior.state === "REFUNDED" ? "request_closed" : "deal_active" };
+      }
+    }
 
     const [listing] = await sql<{ status: string }[]>`
       select status from public.listings where id = ${req.listing_id} for update
@@ -218,6 +246,8 @@ export async function transition(
     action: DealAction;
     priceKobo?: number;
     qty?: number;
+    /** Replace the deal's terms (a counter on a staged quote re-plans the stages). */
+    terms?: DealTerms;
     reason?: string;
     idempotencyKey?: string;
     /** SYSTEM timers pass the token they were scheduled with; a mismatch = stale, skip. */
@@ -287,9 +317,10 @@ export async function transition(
     const newToken = randomUUID();
     const setPrice = p.priceKobo != null ? sql`, price_kobo = ${p.priceKobo}` : sql``;
     const setQty = p.qty != null ? sql`, qty = ${p.qty}` : sql``;
+    const setTerms = p.terms ? sql`, terms = ${sql.json(p.terms)}` : sql``;
     const updated = await sql<DealRow[]>`
       update public.deals
-      set state = ${to}, state_token = ${newToken} ${setPrice} ${setQty}
+      set state = ${to}, state_token = ${newToken} ${setPrice} ${setQty} ${setTerms}
       where id = ${p.dealId} and state_token = ${deal.state_token}
       returning *
     `;

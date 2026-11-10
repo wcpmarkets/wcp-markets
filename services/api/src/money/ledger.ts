@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Sql, Tx } from "../deals/commands.js";
-import { buyerFeeKobo, sellerFeeKobo } from "./fees.js";
+import { buyerFeeKobo, sellerFeeKobo, stageSellerFees } from "./fees.js";
+import { stagesOf } from "../deals/stages.js";
 
 /** A settlement webhook either booked its ledger or was refused (recorded, not booked). */
 export type SettleResult = { ok: true } | { ok: false; reason: string };
@@ -34,6 +35,23 @@ async function heldAmount(sql: Tx, dealId: string): Promise<number | null> {
     where deal_id = ${dealId} and movement = 'hold' and account = 'external'
   `;
   return r?.amount != null ? Number(r.amount) : null;
+}
+
+/**
+ * What refunding a STAGED job returns to the buyer: every stage still held, plus the
+ * buyer fee only if no stage ever left escrow (nothing delivered → made whole, as on
+ * an unstaged deal; once a stage is paid out the escrow service was used and WCP
+ * keeps its fee). Null for an unstaged deal. One rule for the refund request and its
+ * settlement, so the two can't disagree.
+ */
+export async function stageRefundKobo(sql: Tx, dealId: string): Promise<number | null> {
+  const stages = await stagesOf(sql, dealId);
+  if (!stages.length) return null;
+  const heldKobo = stages.filter((s) => s.status === "held").reduce((a, s) => a + Number(s.amount_kobo), 0);
+  if (stages.some((s) => s.status !== "held")) return heldKobo;
+  const total = stages.reduce((a, s) => a + Number(s.amount_kobo), 0);
+  const booked = await heldAmount(sql, dealId);
+  return heldKobo + (booked != null ? booked - total : buyerFeeKobo(total));
 }
 
 /**
@@ -83,30 +101,37 @@ export async function writePayout(
  */
 export async function settlePayout(
   db: Sql,
-  p: { dealId: string; amountKobo: number; providerRef: string },
+  p: { dealId: string; amountKobo: number; providerRef: string; part?: number },
 ): Promise<SettleResult> {
   return db.begin(async (sql) => {
+    const part = p.part ?? 0;
     const [po] = await sql<{ id: string; status: string; amount_kobo: string | number }[]>`
-      select id, status, amount_kobo from public.payouts where deal_id = ${p.dealId} for update
+      select id, status, amount_kobo from public.payouts where deal_id = ${p.dealId} and part = ${part} for update
     `;
     if (!po) return { ok: false, reason: "unknown_payout" };
     if (Number(po.amount_kobo) !== p.amountKobo)
       return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${po.amount_kobo}` };
     if (po.status === "settled") return { ok: true }; // idempotent
-    const prior = await priorSettlement(sql, p.dealId, "payout", p.providerRef);
-    if (prior === "different") return { ok: false, reason: "already_paid_diff_ref" };
-    // Belt: the deal's outstanding seller_payable must equal what we're paying out.
+    // A staged job pays out in parts (one per request as stages release), so another
+    // payout ref on the same deal is expected; the per-part row status is the guard.
+    const staged = (await stagesOf(sql, p.dealId)).length > 0;
+    if (!staged) {
+      const prior = await priorSettlement(sql, p.dealId, "payout", p.providerRef);
+      if (prior === "different") return { ok: false, reason: "already_paid_diff_ref" };
+    }
+    // Belt: never pay out more than the deal's outstanding seller_payable. Unstaged it
+    // must be exactly that; staged, a later stage may have released meanwhile.
     const [bal] = await sql<{ s: string }[]>`
       select coalesce(sum(amount_kobo), 0)::bigint as s from public.ledger_entries
       where deal_id = ${p.dealId} and account = 'seller_payable'
     `;
-    if (Number(bal!.s) !== p.amountKobo)
-      return { ok: false, reason: `balance_mismatch:${bal!.s}!=${p.amountKobo}` };
+    const short = staged ? Number(bal!.s) < p.amountKobo : Number(bal!.s) !== p.amountKobo;
+    if (short) return { ok: false, reason: `balance_mismatch:${bal!.s}!=${p.amountKobo}` };
 
     await writePayout(sql, { dealId: p.dealId, amountKobo: p.amountKobo, providerRef: p.providerRef });
     await sql`
       update public.payouts set status = 'settled', settled_at = now(), provider_ref = ${p.providerRef}
-      where deal_id = ${p.dealId} and status <> 'settled'
+      where deal_id = ${p.dealId} and part = ${part} and status <> 'settled'
     `;
     return { ok: true };
   });
@@ -196,6 +221,8 @@ export async function settleRefund(
     if (!d) return { ok: false, reason: "unknown_deal" };
     if (d.state !== "REFUNDED") return { ok: false, reason: `not_refunded:${d.state}` };
     const principal = Number(d.price_kobo);
+    const staged = await stageRefundKobo(sql, p.dealId);
+    if (staged != null) return settleStageRefund(sql, p, staged);
     // The refund must reverse exactly what the hold booked.
     const expected = (await heldAmount(sql, p.dealId)) ?? principal + buyerFeeKobo(principal);
     if (p.amountKobo !== expected)
@@ -209,6 +236,54 @@ export async function settleRefund(
       fee: p.amountKobo - principal,
       providerRef: p.providerRef,
     });
+    return { ok: true };
+  });
+}
+
+/** A staged job's refund settlement: the still-held stages (+ fee if none released). */
+async function settleStageRefund(
+  sql: Tx,
+  p: { dealId: string; amountKobo: number; providerRef: string },
+  expected: number,
+): Promise<SettleResult> {
+  if (p.amountKobo !== expected) return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${expected}` };
+  const prior = await priorSettlement(sql, p.dealId, "refund", p.providerRef);
+  if (prior === "different") return { ok: false, reason: "already_refunded_diff_ref" };
+  if (prior === "same") return { ok: true };
+  const stages = await stagesOf(sql, p.dealId, true);
+  const principal = stages.filter((s) => s.status === "held").reduce((a, s) => a + Number(s.amount_kobo), 0);
+  await writeRefund(sql, { dealId: p.dealId, seq: null, principal, fee: p.amountKobo - principal, providerRef: p.providerRef });
+  await sql`update public.deal_milestones set status = 'refunded' where deal_id = ${p.dealId} and status = 'held'`;
+  return { ok: true };
+}
+
+/**
+ * Settle ONE stage's release (release.settled carrying part = stage idx). The gate is
+ * the stage row, not the deal state: only a stage the confirm/auto-release/admin
+ * effect moved to 'releasing' can settle, exactly once, for exactly its share
+ * (amount − its slice of the seller fee). A redelivery with the same ref is a no-op;
+ * a different ref for an already-released stage is refused (double-release).
+ */
+export async function settleStageRelease(
+  db: Sql,
+  p: { dealId: string; part: number; providerRef: string; amountKobo: number },
+): Promise<SettleResult> {
+  return db.begin(async (sql) => {
+    const stages = await stagesOf(sql, p.dealId, true);
+    const st = stages.find((x) => x.idx === p.part);
+    if (!st) return { ok: false, reason: "unknown_stage" };
+    if (st.status === "released")
+      return st.provider_ref === p.providerRef ? { ok: true } : { ok: false, reason: "already_released_diff_ref" };
+    if (st.status !== "releasing") return { ok: false, reason: `stage_not_releasing:${st.status}` };
+    const principal = Number(st.amount_kobo);
+    const sellerFee = stageSellerFees(stages.map((x) => Number(x.amount_kobo)))[st.idx - 1]!;
+    if (p.amountKobo !== principal - sellerFee)
+      return { ok: false, reason: `amount_mismatch:${p.amountKobo}!=${principal - sellerFee}` };
+    await writeRelease(sql, { dealId: p.dealId, seq: st.release_seq, principal, sellerFee, providerRef: p.providerRef });
+    await sql`
+      update public.deal_milestones set status = 'released', provider_ref = ${p.providerRef}, released_at = now()
+      where deal_id = ${p.dealId} and idx = ${p.part}
+    `;
     return { ok: true };
   });
 }

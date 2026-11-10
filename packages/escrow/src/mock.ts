@@ -11,18 +11,21 @@ import type { EscrowProvider, EscrowTxn, EscrowWebhook } from "./index.js";
 export class MockEscrowProvider implements EscrowProvider {
   constructor(private readonly secret: string) {}
 
-  private ref(kind: string, dealId: string): string {
-    return `mock_${kind}_${dealId}`;
+  // One ref per (kind, deal, part): a staged job's stages and a deal's later payouts
+  // each need their own, or the ledger's provider_ref idempotency would swallow them.
+  // part 0/absent keeps the original ref, so whole-deal flows are unchanged.
+  private ref(kind: string, dealId: string, part?: number): string {
+    return part ? `mock_${kind}_${dealId}_${part}` : `mock_${kind}_${dealId}`;
   }
 
   async createHold(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn> {
     return { providerRef: this.ref("hold", p.dealId), dealId: p.dealId, amountKobo: p.amountKobo, status: "pending" };
   }
-  async releaseToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn> {
-    return { providerRef: this.ref("rel", p.dealId), dealId: p.dealId, amountKobo: p.amountKobo, status: "released" };
+  async releaseToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string; part?: number }): Promise<EscrowTxn> {
+    return { providerRef: this.ref("rel", p.dealId, p.part), dealId: p.dealId, amountKobo: p.amountKobo, status: "released" };
   }
-  async payoutToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn> {
-    return { providerRef: this.ref("pay", p.dealId), dealId: p.dealId, amountKobo: p.amountKobo, status: "released" };
+  async payoutToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string; part?: number }): Promise<EscrowTxn> {
+    return { providerRef: this.ref("pay", p.dealId, p.part), dealId: p.dealId, amountKobo: p.amountKobo, status: "released" };
   }
   async refundToBuyer(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn> {
     return { providerRef: this.ref("ref", p.dealId), dealId: p.dealId, amountKobo: p.amountKobo, status: "refunded" };

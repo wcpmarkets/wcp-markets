@@ -1946,7 +1946,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Start date in the past */
+                /** @description Start date in the past, or stages that don't fit the price */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -2764,6 +2764,15 @@ export interface paths {
                 };
                 /** @description Illegal transition or conflict */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Stages don't fit the price */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -4341,11 +4350,16 @@ export interface components {
             items: components["schemas"]["QuoteRequest"][];
             counts: components["schemas"]["QuoteRequestCounts"];
         };
+        StagePlan: {
+            title: string;
+            amountKobo: number;
+        };
         QuoteCreate: {
             priceKobo: number;
             scope?: string;
             /** Format: date-time */
             startsAt?: string;
+            milestones?: components["schemas"]["StagePlan"][];
         };
         OtpRequested: {
             /** @enum {string} */
@@ -4486,6 +4500,15 @@ export interface components {
             service: string;
             scope?: string | null;
             startsAt?: string | null;
+            milestones?: components["schemas"]["StagePlan"][];
+        };
+        DealMilestone: {
+            idx: number;
+            title: string;
+            amountKobo: number;
+            /** @enum {string} */
+            status: "proposed" | "held" | "releasing" | "released" | "refunded";
+            releasedAt?: string;
         };
         Deal: {
             /** Format: uuid */
@@ -4504,6 +4527,7 @@ export interface components {
             priceKobo: number;
             qty: number;
             terms?: components["schemas"]["DealTerms"];
+            milestones?: components["schemas"]["DealMilestone"][];
             createdAt: string;
             updatedAt: string;
         };
@@ -4531,6 +4555,7 @@ export interface components {
             action: "counter" | "accept" | "decline" | "withdraw" | "cancel";
             priceKobo?: number;
             qty?: number;
+            milestones?: components["schemas"]["StagePlan"][];
         };
         Message: {
             id: number;

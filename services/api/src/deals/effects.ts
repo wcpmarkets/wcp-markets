@@ -1,7 +1,8 @@
 import type { DealRow, Tx } from "./commands.js";
 import type { DealAction, DealState } from "./machine.js";
-import { buyerFeeKobo, sellerFeeKobo } from "../money/fees.js";
-import { writeHold } from "../money/ledger.js";
+import { buyerFeeKobo, sellerFeeKobo, stageSellerFees } from "../money/fees.js";
+import { stageRefundKobo, writeHold } from "../money/ledger.js";
+import { stagesOf } from "./stages.js";
 
 /**
  * Per-action side effects, run INSIDE the transition tx after the deal is locked and
@@ -42,6 +43,8 @@ function refundReason(action: DealAction, fromState: DealState): string {
 // seller → release funds net of the 2% seller fee. No ledger here — the release
 // ledger is written on the release.settled webhook (symmetry with the hold).
 const releaseFunds: Effect = async (sql, { deal, seq, action }) => {
+  const stages = await stagesOf(sql, deal.id, true);
+  if (stages.length) return releaseStages(sql, deal, seq, action, stages);
   const principal = Number(deal.price_kobo);
   const sellerFee = sellerFeeKobo(principal);
   const reason =
@@ -52,6 +55,40 @@ const releaseFunds: Effect = async (sql, { deal, seq, action }) => {
       ${sql.json({ dealId: deal.id, seq, principal, sellerFee, payout: principal - sellerFee, reason })},
       ${deal.id}, ${seq})
   `;
+};
+
+// A staged job releases one stage at a time: the buyer's confirm (or the 48h timer)
+// releases the CURRENT stage — the first still held — and, while later stages remain
+// held, redirects to release_stage so the deal goes back to PAID_IN_ESCROW for the
+// next one. An admin resolving a dispute for the provider releases everything held.
+// Each stage is its own escrow command (part = stage idx) and settles on its own.
+const releaseStages = async (
+  sql: Tx,
+  deal: DealRow,
+  seq: number,
+  action: DealAction,
+  stages: Awaited<ReturnType<typeof stagesOf>>,
+): Promise<EffectResult> => {
+  const fees = stageSellerFees(stages.map((s) => Number(s.amount_kobo)));
+  const held = stages.filter((s) => s.status === "held");
+  const all = action === "resolve_release";
+  const now = all ? held : held.slice(0, 1);
+  const reason = all ? "admin_release" : action === "auto_release" ? "auto_release" : "confirmed";
+  for (const st of now) {
+    const principal = Number(st.amount_kobo);
+    const sellerFee = fees[st.idx - 1]!;
+    await sql`
+      update public.deal_milestones set status = 'releasing', release_seq = ${seq}
+      where deal_id = ${deal.id} and idx = ${st.idx} and status = 'held'
+    `;
+    await sql`
+      insert into public.outbox (topic, payload, deal_id, event_seq)
+      values ('escrow.release',
+        ${sql.json({ dealId: deal.id, seq, part: st.idx, principal, sellerFee, payout: principal - sellerFee, reason })},
+        ${deal.id}, ${seq})
+    `;
+  }
+  if (!all && held.length > now.length) return { redirectAction: "release_stage" };
 };
 
 // Seller cancels, the hand-off SLA lapses, a dispute times out, or an admin resolves
@@ -65,7 +102,10 @@ const refundBuyer: Effect = async (sql, { deal, seq, action }) => {
     where deal_id = ${deal.id} and movement = 'hold' and account = 'external'
   `;
   const principal = Number(deal.price_kobo);
-  const amount = held?.amount != null ? Number(held.amount) : principal + buyerFeeKobo(principal);
+  // A staged job refunds only what is still held (stages.ts) — released stages are
+  // the provider's. stageRefundKobo is the same rule the refund settlement checks.
+  const staged = await stageRefundKobo(sql, deal.id);
+  const amount = staged ?? (held?.amount != null ? Number(held.amount) : principal + buyerFeeKobo(principal));
   await sql`
     insert into public.outbox (topic, payload, deal_id, event_seq)
     values ('escrow.refund',
@@ -113,6 +153,19 @@ export const EFFECTS: Partial<Record<DealAction, Effect>> = {
       fee,
       providerRef: providerRef ?? `hold:${deal.id}`,
     });
+
+    // A staged quote: the plan the buyer accepted becomes the stages escrow releases
+    // against. The DB checks they sum to the price (deal_milestones_sum, deferred).
+    const plan = deal.terms?.milestones;
+    if (plan?.length) {
+      for (const [i, st] of plan.entries()) {
+        await sql`
+          insert into public.deal_milestones (deal_id, idx, title, amount_kobo)
+          values (${deal.id}, ${i + 1}, ${st.title}, ${st.amountKobo})
+          on conflict (deal_id, idx) do nothing
+        `;
+      }
+    }
 
     // A service is a provider's time, not a unit on a shelf: a booked job never
     // sells out the listing, so only goods-style lanes decrement stock.

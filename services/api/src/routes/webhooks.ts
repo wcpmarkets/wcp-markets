@@ -3,7 +3,7 @@ import type { EscrowWebhook } from "@wcp/escrow";
 import type { AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import { transition, type Sql } from "../deals/commands.js";
-import { settlePayout, settleRefund, settleRelease } from "../money/ledger.js";
+import { settlePayout, settleRefund, settleRelease, settleStageRelease } from "../money/ledger.js";
 import { getEscrowProvider } from "../money/provider.js";
 
 /**
@@ -60,11 +60,14 @@ export function registerWebhooks(app: OpenAPIHono<AuthEnv>) {
       if (!r.ok) await recordException(db, wh, `refund.settled:${r.reason}`);
     } else if (wh.type === "release.settled") {
       // The release ledger is written HERE (settlement), not at confirm time.
-      const r = await settleRelease(db, { dealId: wh.dealId, providerRef: wh.providerRef, amountKobo: wh.amountKobo });
+      // A staged job settles stage by stage (part = stage idx).
+      const r = wh.part
+        ? await settleStageRelease(db, { dealId: wh.dealId, part: wh.part, providerRef: wh.providerRef, amountKobo: wh.amountKobo })
+        : await settleRelease(db, { dealId: wh.dealId, providerRef: wh.providerRef, amountKobo: wh.amountKobo });
       if (!r.ok) await recordException(db, wh, `release.settled:${r.reason}`);
     } else if (wh.type === "payout.settled") {
       // seller_payable → external (money out to the seller's bank).
-      const r = await settlePayout(db, { dealId: wh.dealId, amountKobo: wh.amountKobo, providerRef: wh.providerRef });
+      const r = await settlePayout(db, { dealId: wh.dealId, amountKobo: wh.amountKobo, providerRef: wh.providerRef, part: wh.part });
       if (!r.ok) await recordException(db, wh, `payout.settled:${r.reason}`);
     }
 

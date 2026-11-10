@@ -24,15 +24,20 @@ export type EscrowWebhook = {
   providerRef: string;
   dealId: string;
   amountKobo: number;
+  /**
+   * Which part of the deal this settles — a staged job's stage idx (release) or the
+   * deal's nth payout. Our metadata, echoed back by the partner; absent = the whole deal.
+   */
+  part?: number;
 };
 
 export interface EscrowProvider {
   /** Create a hold for a deal (buyer principal + fee). Async: confirmation arrives by webhook. */
   createHold(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn>;
   /** Release held funds to the seller (net of fee). Settlement arrives by webhook. */
-  releaseToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn>;
+  releaseToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string; part?: number }): Promise<EscrowTxn>;
   /** Pay out the seller's balance to their bank (L2-gated upstream). Settles by webhook. */
-  payoutToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn>;
+  payoutToSeller(p: { dealId: string; amountKobo: number; idempotencyKey: string; part?: number }): Promise<EscrowTxn>;
   /** Refund held funds to the buyer. Settlement arrives by webhook. */
   refundToBuyer(p: { dealId: string; amountKobo: number; idempotencyKey: string }): Promise<EscrowTxn>;
   /** Look up a transaction (reconciliation). */

@@ -1524,6 +1524,24 @@
           "counts"
         ]
       },
+      "StagePlan": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "amountKobo": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "title",
+          "amountKobo"
+        ]
+      },
       "QuoteCreate": {
         "type": "object",
         "properties": {
@@ -1538,6 +1556,13 @@
           "startsAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StagePlan"
+            },
+            "maxItems": 6
           }
         },
         "required": [
@@ -2142,10 +2167,52 @@
               "string",
               "null"
             ]
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StagePlan"
+            },
+            "maxItems": 6
           }
         },
         "required": [
           "service"
+        ]
+      },
+      "DealMilestone": {
+        "type": "object",
+        "properties": {
+          "idx": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "title": {
+            "type": "string"
+          },
+          "amountKobo": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "held",
+              "releasing",
+              "released",
+              "refunded"
+            ]
+          },
+          "releasedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "idx",
+          "title",
+          "amountKobo",
+          "status"
         ]
       },
       "Deal": {
@@ -2191,6 +2258,12 @@
           },
           "terms": {
             "$ref": "#/components/schemas/DealTerms"
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DealMilestone"
+            }
           },
           "createdAt": {
             "type": "string"
@@ -2331,6 +2404,13 @@
           "qty": {
             "type": "integer",
             "exclusiveMinimum": 0
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StagePlan"
+            },
+            "maxItems": 6
           }
         },
         "required": [
@@ -4754,7 +4834,7 @@
             }
           },
           "422": {
-            "description": "Start date in the past",
+            "description": "Start date in the past, or stages that don't fit the price",
             "content": {
               "application/json": {
                 "schema": {
@@ -5860,6 +5940,16 @@
           },
           "409": {
             "description": "Illegal transition or conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Stages don't fit the price",
             "content": {
               "application/json": {
                 "schema": {

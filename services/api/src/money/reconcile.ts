@@ -7,7 +7,9 @@ import { OUTBOX_MAX_ATTEMPTS } from "../deals/sweeper.js";
  * comparison drops in here later behind the same result shape. Invariants:
  *   1. The whole ledger nets to ZERO (every naira is accounted for).
  *   2. Each deal's escrow_holding balance is exactly 0 (settled) or its principal
- *      (held) — never partial, double, or negative.
+ *      (held) — never partial, double, or negative. A STAGED job (deal_milestones)
+ *      is legitimately partial: there "held" means principal minus the stages whose
+ *      release has settled, and nothing else.
  *   3. SETTLEMENT LAG: a TERMINAL deal (COMPLETED/REFUNDED) with funds still in
  *      escrow after a grace period is a STUCK settlement — the seller was never paid
  *      / the buyer never refunded even though the deal reads done. Invariant 2 alone
@@ -28,6 +30,7 @@ export type ReconResult = {
   disputesOverdue: StuckDispute[];
   payoutsOverdue: string[]; // payout deal ids stuck 'pending'
   negativePayable: string[]; // deal ids with seller_payable < 0 (double-payout tripwire)
+  stagesOverdue: { dealId: string; idx: number }[]; // stage releases never settled
 };
 
 const PAYOUT_GRACE_MINS = 30;
@@ -45,9 +48,13 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     select le.deal_id, sum(le.amount_kobo)::bigint as esc, d.price_kobo::bigint as principal, d.state
     from public.ledger_entries le
     join public.deals d on d.id = le.deal_id
+    left join lateral (
+      select coalesce(sum(m.amount_kobo), 0) as released
+      from public.deal_milestones m where m.deal_id = d.id and m.status = 'released'
+    ) st on true
     where le.account = 'escrow_holding'
-    group by le.deal_id, d.price_kobo, d.state
-    having sum(le.amount_kobo) not in (0, d.price_kobo)
+    group by le.deal_id, d.price_kobo, d.state, st.released
+    having sum(le.amount_kobo) not in (0, d.price_kobo - st.released)
   `;
   const overdue = await db<{ deal_id: string; esc: string; state: string }[]>`
     select le.deal_id, sum(le.amount_kobo)::bigint as esc, d.state
@@ -73,6 +80,12 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     select deal_id from public.payouts
     where status = 'pending' and created_at < now() - make_interval(mins => ${PAYOUT_GRACE_MINS})
   `;
+  // (8) A stage whose release was requested but never settled — the provider was
+  // told the money was on its way. Non-terminal deals escape invariant 3, so watch it.
+  const stagesStuck = await db<{ deal_id: string; idx: number }[]>`
+    select deal_id, idx from public.deal_milestones
+    where status = 'releasing' and updated_at < now() - make_interval(mins => ${SETTLEMENT_GRACE_MINS})
+  `;
   const negPayable = await db<{ deal_id: string }[]>`
     select deal_id from public.ledger_entries where account = 'seller_payable'
     group by deal_id having sum(amount_kobo) < 0
@@ -85,6 +98,7 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     disputesOverdue: disputes.map((r) => ({ dealId: r.deal_id, state: r.state })),
     payoutsOverdue: payoutsStuck.map((r) => r.deal_id),
     negativePayable: negPayable.map((r) => r.deal_id),
+    stagesOverdue: stagesStuck.map((r) => ({ dealId: r.deal_id, idx: r.idx })),
   };
 }
 
@@ -102,7 +116,8 @@ export async function reconcileAndRecord(db: Sql): Promise<ReconResult> {
     r.parkedOutbox > 0 ||
     r.disputesOverdue.length > 0 ||
     r.payoutsOverdue.length > 0 ||
-    r.negativePayable.length > 0;
+    r.negativePayable.length > 0 ||
+    r.stagesOverdue.length > 0;
   if (!bad) return r;
 
   console.error(
@@ -134,6 +149,9 @@ export async function reconcileAndRecord(db: Sql): Promise<ReconResult> {
   }
   for (const dealId of r.negativePayable.slice(0, 50)) {
     await record(dealId, "negative_seller_payable", "seller_payable < 0 — likely double-payout");
+  }
+  for (const st of r.stagesOverdue.slice(0, 50)) {
+    await record(st.dealId, "stage_release_overdue", `stage ${st.idx} 'releasing' >${SETTLEMENT_GRACE_MINS}m — provider unpaid`);
   }
   if (r.globalBalanceKobo !== 0) await record(null, "ledger_global_imbalance", `total=${r.globalBalanceKobo}`);
   if (r.parkedOutbox > 0) await record(null, "outbox_parked", `count=${r.parkedOutbox} (attempts>=${OUTBOX_MAX_ATTEMPTS})`);

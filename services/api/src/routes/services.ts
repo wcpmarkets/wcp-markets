@@ -3,6 +3,8 @@ import { auth, type AuthEnv } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rate-limit.js";
 import { getDb } from "../db.js";
 import { createQuote, type Sql } from "../deals/commands.js";
+import { stageProblem, MAX_STAGES } from "../deals/stages.js";
+import { StagePlanSchema } from "./deals.js";
 import { AVAILABILITY, COVERAGE_KM, SERVICE_CATALOG } from "../data/services.js";
 import { isState, areaCentre } from "../data/ng-regions.js";
 import { UserSummarySchema, isBlockedEitherWay, userSummaries } from "../profiles/summary.js";
@@ -75,6 +77,8 @@ const QuoteCreateSchema = z
     priceKobo: z.number().int().positive(),
     scope: z.string().trim().max(200).optional(),
     startsAt: z.string().datetime({ offset: true }).optional(),
+    /** Split into milestones (22c-quotebuild): 2–6 stages summing to priceKobo. */
+    milestones: z.array(StagePlanSchema).max(MAX_STAGES).optional(),
   })
   .openapi("QuoteCreate");
 
@@ -361,7 +365,7 @@ export function registerServices(app: OpenAPIHono<AuthEnv>) {
           description: "Request closed, listing unavailable, or a quote is already live (counter it instead)",
           content: { "application/json": { schema: ErrorSchema } },
         },
-        422: { description: "Start date in the past", content: { "application/json": { schema: ErrorSchema } } },
+        422: { description: "Start date in the past, or stages that don't fit the price", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -374,6 +378,11 @@ export function registerServices(app: OpenAPIHono<AuthEnv>) {
       if (b.startsAt && new Date(b.startsAt).getTime() < Date.now() - 3_600_000) {
         return c.json({ error: "starts_in_past" }, 422);
       }
+      const staged = b.milestones?.length ? b.milestones : undefined;
+      if (staged) {
+        const bad = stageProblem(staged, b.priceKobo);
+        if (bad) return c.json({ error: bad }, 422);
+      }
       const [req] = await db<{ buyer_id: string; service: string }[]>`
         select buyer_id, service from public.quote_requests where id = ${id} and seller_id = ${user.sub}
       `;
@@ -384,7 +393,7 @@ export function registerServices(app: OpenAPIHono<AuthEnv>) {
         requestId: id,
         sellerId: user.sub,
         priceKobo: b.priceKobo,
-        terms: { service: req.service, scope: b.scope ?? null, startsAt: b.startsAt ?? null },
+        terms: { service: req.service, scope: b.scope ?? null, startsAt: b.startsAt ?? null, milestones: staged },
         idempotencyKey: c.req.header("idempotency-key") ?? undefined,
       });
       if (!r.ok) {

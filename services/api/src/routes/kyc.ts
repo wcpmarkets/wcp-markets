@@ -203,7 +203,12 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       const { id } = c.req.valid("param");
       const [deal] = await db<{ seller_id: string; state: string }[]>`select seller_id, state from public.deals where id = ${id}`;
       if (!deal || deal.seller_id !== user.sub) return c.json({ error: "not_found" }, 404);
-      if (deal.state !== "COMPLETED") return c.json({ error: "not_payable" }, 409);
+      // A staged job pays the provider as stages release (22c-quotebuild: "Get paid in
+      // stages as work is done"), so its released money is withdrawable mid-job. Never
+      // during a dispute — that freezes the job's money until it's resolved.
+      const [staged] = await db`select 1 from public.deal_milestones where deal_id = ${id} limit 1`;
+      const payable = deal.state === "COMPLETED" || (!!staged && ["PAID_IN_ESCROW", "HANDED_OFF"].includes(deal.state));
+      if (!payable) return c.json({ error: "not_payable" }, 409);
 
       // The gate: no payout until the seller is L2-verified.
       const [prof] = await db<{ verification_level: number }[]>`select verification_level from public.profiles where id = ${user.sub}`;
@@ -219,16 +224,21 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       let out: PayoutRow | null;
       try {
         out = await db.begin(async (sql) => {
-          const [existing] = await sql<{ id: string }[]>`select id from public.payouts where deal_id = ${id}`;
-          if (existing) return null;
+          // One payout per deal, or (staged) one per request — never two in flight.
+          const prior = await sql<{ part: number; status: string }[]>`
+            select part, status from public.payouts where deal_id = ${id} order by part for update
+          `;
+          if (prior.some((p) => p.status === "pending")) return null;
+          if (prior.length && !staged) return null;
+          const part = prior.length;
           const [po] = await sql<PayoutRow[]>`
-            insert into public.payouts (deal_id, seller_id, amount_kobo)
-            values (${id}, ${user.sub}, ${amount})
+            insert into public.payouts (deal_id, seller_id, amount_kobo, part)
+            values (${id}, ${user.sub}, ${amount}, ${part})
             returning id, deal_id, seller_id, amount_kobo, status, created_at, settled_at
           `;
           await sql`
             insert into public.outbox (topic, payload, deal_id)
-            values ('escrow.payout', ${sql.json({ dealId: id, amount, sellerId: user.sub })}, ${id})
+            values ('escrow.payout', ${sql.json({ dealId: id, amount, sellerId: user.sub, part })}, ${id})
           `;
           return po!;
         });
@@ -268,6 +278,7 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       const [row] = await db<PayoutRow[]>`
         select id, deal_id, seller_id, amount_kobo, status, created_at, settled_at
         from public.payouts where deal_id = ${id} and seller_id = ${user.sub}
+        order by part desc limit 1
       `;
       if (!row) return c.json({ error: "not_found" }, 404);
       return c.json(toPayout(row), 200);

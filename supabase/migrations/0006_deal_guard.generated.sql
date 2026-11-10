@@ -41,6 +41,8 @@ returns text language sql immutable as $$
     ('PAID_IN_ESCROW', 'SYSTEM', 'auto_refund', 'REFUNDED'),
     ('HANDED_OFF', 'BUYER', 'confirm_receipt', 'COMPLETED'),
     ('HANDED_OFF', 'SYSTEM', 'auto_release', 'COMPLETED'),
+    ('HANDED_OFF', 'BUYER', 'release_stage', 'PAID_IN_ESCROW'),
+    ('HANDED_OFF', 'SYSTEM', 'release_stage', 'PAID_IN_ESCROW'),
     ('PAID_IN_ESCROW', 'BUYER', 'dispute', 'DISPUTED'),
     ('HANDED_OFF', 'BUYER', 'dispute', 'DISPUTED'),
     ('DISPUTED', 'SYSTEM', 'auto_refund', 'REFUNDED'),

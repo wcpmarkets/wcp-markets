@@ -1,7 +1,8 @@
 import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { auth, type AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
-import { createOffer, transition, type DealRow } from "../deals/commands.js";
+import { createOffer, transition, type DealRow, type DealTerms, type Sql } from "../deals/commands.js";
+import { rescaleStages, stageProblem, MAX_STAGES, type StageRow } from "../deals/stages.js";
 import { isBlockedEitherWay } from "../profiles/summary.js";
 
 /**
@@ -13,14 +14,38 @@ import { isBlockedEitherWay } from "../profiles/summary.js";
 
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 
+/** One stage of a staged quote as proposed (22c-quotebuild): what it covers + its share. */
+export const StagePlanSchema = z
+  .object({
+    title: z.string().trim().min(1).max(60),
+    amountKobo: z.number().int().positive(),
+  })
+  .openapi("StagePlan");
+
 /** A service quote's terms (22c-quotecard: Service · Scope · When). Absent on goods deals. */
 export const DealTermsSchema = z
   .object({
     service: z.string(),
     scope: z.string().nullable().optional(),
     startsAt: z.string().nullable().optional(),
+    /** A staged quote: stages summing to the price, released one by one (22c-milestone). */
+    milestones: z.array(StagePlanSchema).max(MAX_STAGES).optional(),
   })
   .openapi("DealTerms");
+
+/**
+ * A staged job's stage and where its money is (22c-milestone). "proposed" until the
+ * buyer funds escrow; then held → releasing → released (or refunded).
+ */
+const DealMilestoneSchema = z
+  .object({
+    idx: z.number().int().positive(),
+    title: z.string(),
+    amountKobo: z.number().int().positive(),
+    status: z.enum(["proposed", "held", "releasing", "released", "refunded"]),
+    releasedAt: z.string().optional(),
+  })
+  .openapi("DealMilestone");
 
 const DealSchema = z
   .object({
@@ -34,6 +59,8 @@ const DealSchema = z
     priceKobo: z.number().int().nonnegative(),
     qty: z.number().int().positive(),
     terms: DealTermsSchema.optional(),
+    /** A staged job's stages with their money status (absent when unstaged). */
+    milestones: z.array(DealMilestoneSchema).optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -79,6 +106,11 @@ const DealActionSchema = z
     action: z.enum(["counter", "accept", "decline", "withdraw", "cancel"]),
     priceKobo: z.number().int().nonnegative().optional(),
     qty: z.number().int().positive().optional(),
+    /**
+     * Provider counters only: re-split a service quote into stages summing to
+     * priceKobo ([] drops the split). Omitted, a staged quote keeps its proportions.
+     */
+    milestones: z.array(StagePlanSchema).max(MAX_STAGES).optional(),
   })
   .openapi("DealAction");
 
@@ -88,7 +120,36 @@ const MessageCreateSchema = z
 
 const iso = (v: string | Date): string => (typeof v === "string" ? v : v.toISOString());
 
-function toDeal(d: DealRow, uid: string): z.infer<typeof DealSchema> {
+type DealOut = z.infer<typeof DealSchema>;
+
+/** Live stages when escrow holds them; the proposed plan from the terms before that. */
+function milestonesOf(d: DealRow, rows: StageRow[] | undefined): DealOut["milestones"] {
+  if (rows?.length) {
+    return rows.map((m) => ({
+      idx: m.idx,
+      title: m.title,
+      amountKobo: Number(m.amount_kobo),
+      status: m.status,
+      releasedAt: m.released_at ? iso(m.released_at) : undefined,
+    }));
+  }
+  const plan = d.terms?.milestones;
+  return plan?.length
+    ? plan.map((m, i) => ({ idx: i + 1, title: m.title, amountKobo: m.amountKobo, status: "proposed" as const }))
+    : undefined;
+}
+
+/** Deals as the API returns them, stages included (one query for the lot). */
+async function dealsOut(db: Sql, deals: DealRow[], uid: string): Promise<DealOut[]> {
+  const ids = deals.filter((d) => d.terms?.milestones?.length).map((d) => d.id);
+  const rows = ids.length
+    ? await db<StageRow[]>`select * from public.deal_milestones where deal_id = any(${ids}::uuid[]) order by idx`
+    : [];
+  return deals.map((d) => ({ ...toDeal(d, uid), milestones: milestonesOf(d, rows.filter((r) => r.deal_id === d.id)) }));
+}
+const dealOut = async (db: Sql, d: DealRow, uid: string) => (await dealsOut(db, [d], uid))[0]!;
+
+function toDeal(d: DealRow, uid: string): DealOut {
   return {
     id: d.id,
     listingId: d.listing_id,
@@ -181,7 +242,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         where buyer_id = ${user.sub} or seller_id = ${user.sub}
         order by updated_at desc
       `;
-      return c.json(rows.map((d) => toDeal(d, user.sub)), 200);
+      return c.json(await dealsOut(db, rows, user.sub), 200);
     },
   );
 
@@ -228,7 +289,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       `;
       return c.json(
         {
-          ...toDeal(deal, user.sub),
+          ...(await dealOut(db, deal, user.sub)),
           events: events.map((e) => ({
             seq: e.seq,
             actor: e.actor,
@@ -265,6 +326,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         401: { description: "Unauthorized" },
         404: { description: "Not found" },
         409: { description: "Illegal transition or conflict", content: { "application/json": { schema: ErrorSchema } } },
+        422: { description: "Stages don't fit the price", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -275,8 +337,8 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       const { id } = c.req.valid("param");
       const b = c.req.valid("json");
 
-      const [deal] = await db<{ buyer_id: string; seller_id: string }[]>`
-        select buyer_id, seller_id from public.deals where id = ${id}
+      const [deal] = await db<{ buyer_id: string; seller_id: string; terms: DealTerms | null }[]>`
+        select buyer_id, seller_id, terms from public.deals where id = ${id}
       `;
       if (!deal || (deal.buyer_id !== user.sub && deal.seller_id !== user.sub))
         return c.json({ error: "not_found" }, 404);
@@ -284,6 +346,27 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         return c.json({ error: "counter_requires_price" }, 400);
 
       const actor = deal.buyer_id === user.sub ? "BUYER" : "SELLER";
+
+      // A counter on a service quote re-plans its stages: the provider may re-split
+      // (or drop the split); otherwise the stages keep their proportions at the new
+      // price. Only a provider decides how the work is staged.
+      let terms: DealTerms | undefined;
+      if (b.milestones && (b.action !== "counter" || actor !== "SELLER" || !deal.terms))
+        return c.json({ error: "only_provider_counter_stages" }, 400);
+      if (b.action === "counter" && deal.terms) {
+        const plan = b.milestones ?? deal.terms.milestones ?? [];
+        if (b.milestones?.length) {
+          const bad = stageProblem(b.milestones, b.priceKobo!);
+          if (bad) return c.json({ error: bad }, 422);
+          terms = { ...deal.terms, milestones: b.milestones };
+        } else if (plan.length && !b.milestones) {
+          const scaled = rescaleStages(plan, b.priceKobo!);
+          if (!scaled) return c.json({ error: "price_too_low_for_stages" }, 422);
+          terms = { ...deal.terms, milestones: scaled };
+        } else if (b.milestones) {
+          terms = { ...deal.terms, milestones: undefined };
+        }
+      }
       const r = await transition(db, {
         dealId: id,
         actor,
@@ -291,6 +374,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         action: b.action,
         priceKobo: b.priceKobo,
         qty: b.qty,
+        terms,
         idempotencyKey: idem(c),
       });
       if (!r.ok) {
@@ -303,7 +387,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
               : "conflict";
         return c.json({ error: err }, 409);
       }
-      return c.json(toDeal(r.deal, user.sub), 200);
+      return c.json(await dealOut(db, r.deal, user.sub), 200);
     },
   );
 
@@ -351,7 +435,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
         return c.json({ error: r.code === "illegal" ? "not_payable" : "conflict" }, 409);
       }
-      return c.json(toDeal(r.deal, user.sub), 200);
+      return c.json(await dealOut(db, r.deal, user.sub), 200);
     },
   );
 
@@ -395,7 +479,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
         return c.json({ error: r.code === "illegal" ? "illegal_transition" : "conflict" }, 409);
       }
-      return c.json(toDeal(r.deal, user.sub), 200);
+      return c.json(await dealOut(db, r.deal, user.sub), 200);
     },
   );
 
@@ -440,7 +524,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
         return c.json({ error: r.code === "illegal" ? "illegal_transition" : "conflict" }, 409);
       }
-      return c.json(toDeal(r.deal, user.sub), 200);
+      return c.json(await dealOut(db, r.deal, user.sub), 200);
     },
   );
 
