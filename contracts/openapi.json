@@ -632,10 +632,7 @@
         ]
       },
       "Viewing": {
-        "type": [
-          "object",
-          "null"
-        ],
+        "type": "object",
         "properties": {
           "id": {
             "type": "string",
@@ -756,7 +753,6 @@
           "unreadCount",
           "deal",
           "blocked",
-          "viewing",
           "createdAt"
         ]
       },
@@ -3900,14 +3896,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/Viewing"
-                      },
-                      {
-                        "type": "object"
-                      }
-                    ]
+                    "$ref": "#/components/schemas/Viewing"
                   }
                 }
               }
@@ -3967,14 +3956,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/Viewing"
-                    },
-                    {
-                      "type": "object"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/Viewing"
                 }
               }
             }
@@ -4056,14 +4038,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/Viewing"
-                    },
-                    {
-                      "type": "object"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/Viewing"
                 }
               }
             }
@@ -4135,14 +4110,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/Viewing"
-                    },
-                    {
-                      "type": "object"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/Viewing"
                 }
               }
             }

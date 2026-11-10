@@ -127,7 +127,7 @@ async function main() {
     const convR = await api(`/listings/${A.id}/conversations`, buyer.token, { method: "POST" });
     const conv = await j<{ id: string; viewing: unknown }>(convR);
     check("enquiry opens a chat", convR.status === 200 || convR.status === 201, `${convR.status}`);
-    check("…with no viewing yet", conv.viewing === null);
+    check("…with no viewing yet", conv.viewing == null);
 
     // ── Viewings ──────────────────────────────────────────────────────────
     console.log("viewings");
@@ -162,7 +162,7 @@ async function main() {
     check("cancel again → 409", (await api(`/viewings/${v2.id}/cancel`, buyer.token, { method: "POST" })).status === 409);
     check("outsider cancel → 404", (await api(`/viewings/${v1.id}/cancel`, other.token, { method: "POST" })).status === 404);
     const after = await j<{ viewing: Viewing | null }>(await api(`/conversations/${conv.id}`, buyer.token));
-    check("no live viewing after cancel", after.viewing === null);
+    check("no live viewing after cancel", after.viewing == null);
     await api(`/users/${dealer.id}/block`, buyer.token, { method: "PUT" });
     const blocked = await propose(dealer.token, { startsAt: at(24), place: "Lot" });
     check("blocked → 403", blocked.status === 403, `${blocked.status}`);

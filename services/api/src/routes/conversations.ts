@@ -53,8 +53,10 @@ const ConversationSchema = z
     /** The most recent deal on this listing between these two, if any. */
     deal: z.object({ id: z.string().uuid(), state: z.string() }).nullable().openapi("ConversationDeal"),
     blocked: z.boolean(),
-    /** The live (proposed or confirmed) viewing in this thread, if any (0024). */
-    viewing: ViewingSchema.nullable(),
+    /** The live (proposed or confirmed) viewing in this thread; absent when there is none (0024).
+     *  Optional rather than nullable: .nullable() on a registered schema makes the
+     *  component itself nullable, and every other use becomes an allOf wrapper. */
+    viewing: ViewingSchema.optional(),
     createdAt: z.string(),
   })
   .openapi("Conversation");
@@ -156,7 +158,7 @@ async function toConversations(db: Sql, me: string, rows: ConvRow[]) {
         unreadCount: r.unread,
         deal: r.deal_id && r.deal_state ? { id: r.deal_id, state: r.deal_state } : null,
         blocked: r.blocked,
-        viewing: r.viewing ? toViewing(r.viewing) : null,
+        viewing: r.viewing ? toViewing(r.viewing) : undefined,
         createdAt: iso(r.created_at),
       };
     }),

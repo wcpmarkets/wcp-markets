@@ -1418,7 +1418,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": (components["schemas"]["Viewing"] & Record<string, never>)[];
+                        "application/json": components["schemas"]["Viewing"][];
                     };
                 };
                 /** @description Unauthorized */
@@ -1469,7 +1469,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Viewing"] & Record<string, never>;
+                        "application/json": components["schemas"]["Viewing"];
                     };
                 };
                 /** @description Unauthorized */
@@ -1557,7 +1557,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Viewing"] & Record<string, never>;
+                        "application/json": components["schemas"]["Viewing"];
                     };
                 };
                 /** @description Unauthorized */
@@ -1636,7 +1636,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Viewing"] & Record<string, never>;
+                        "application/json": components["schemas"]["Viewing"];
                     };
                 };
                 /** @description Unauthorized */
@@ -3861,7 +3861,7 @@ export interface components {
             /** Format: uuid */
             cancelledBy: string | null;
             createdAt: string;
-        } | null;
+        };
         Conversation: {
             /** Format: uuid */
             id: string;
@@ -3873,7 +3873,7 @@ export interface components {
             unreadCount: number;
             deal: components["schemas"]["ConversationDeal"];
             blocked: boolean;
-            viewing: components["schemas"]["Viewing"];
+            viewing?: components["schemas"]["Viewing"];
             createdAt: string;
         };
         ConversationPage: {
