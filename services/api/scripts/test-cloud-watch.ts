@@ -92,7 +92,7 @@ async function main() {
     const wr = await fetch(`${API}/me/watches`, {
       method: "POST",
       headers: H(buyer.token),
-      body: JSON.stringify({ label: `Tecno Spark ${word} under ₦50k`, lane: "goods", keywords: `Tecno Spark ${word}`, filters: { category: "phones" }, ceilingKobo: 5_000_000 }),
+      body: JSON.stringify({ label: `Tecno Spark ${word} under ₦50k`, lane: "goods", keywords: word, filters: { category: "phones" }, ceilingKobo: 5_000_000 }),
     });
     const w = (await wr.json()) as { id: string; hits: { listing: { id: string } }[]; ceilingKobo: number };
     check("watch → 201", wr.status === 201 && w.ceilingKobo === 5_000_000, `${wr.status}`);
@@ -115,7 +115,7 @@ async function main() {
     const list = (await (await fetch(`${API}/me/watches`, { headers: H(buyer.token) })).json()) as { items: { id: string; hits: { listing: { id: string }; underKobo: number | null }[]; marketCount: number; marketMinKobo: number | null }[] };
     const mine = list.items.find((x) => x.id === w.id);
     check("listed with both hits", mine?.hits.length === 2, `${mine?.hits.length}`);
-    check("market ignores the ceiling", mine?.marketCount === 2 && mine.marketMinKobo === 4_000_000, JSON.stringify(mine && { n: mine.marketCount, min: mine.marketMinKobo }));
+    check("market ignores the ceiling (the sofa shares the token)", mine?.marketCount === 3 && mine.marketMinKobo === 4_000_000, JSON.stringify(mine && { n: mine.marketCount, min: mine.marketMinKobo }));
     const dis = await fetch(`${API}/me/watches/${w.id}/dismiss`, { method: "POST", headers: H(buyer.token), body: JSON.stringify({ listingId: l2 }) });
     const after = (await (await fetch(`${API}/me/watches`, { headers: H(buyer.token) })).json()) as typeof list;
     check("dismiss hides it", dis.status === 204 && !after.items.find((x) => x.id === w.id)?.hits.some((h) => h.listing.id === l2));
@@ -125,7 +125,7 @@ async function main() {
     check("Deals ✦ lists both, each with its listing", page.items.length === 2 && page.items.every((i) => i.topic === "watch" && !!i.listingId), page.items.map((i) => i.title).join(" | "));
 
     console.log("D. own listings, delete");
-    const ownW = (await (await fetch(`${API}/me/watches`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ label: "own", keywords: `Tecno Spark ${word}`, filters: { category: "phones" } }) })).json()) as { hits: unknown[] };
+    const ownW = (await (await fetch(`${API}/me/watches`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ label: "own", keywords: word, filters: { category: "phones" } }) })).json()) as { hits: unknown[] };
     check("a seller's watch never shows their own listings", ownW.hits.length === 0);
     check("delete → 204", (await fetch(`${API}/me/watches/${w.id}`, { method: "DELETE", headers: H(buyer.token) })).status === 204);
     const gone = (await (await fetch(`${API}/me/watches`, { headers: H(buyer.token) })).json()) as typeof list;
