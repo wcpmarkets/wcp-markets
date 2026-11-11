@@ -49,9 +49,14 @@ export async function emailsFor(db: Sql, userId: string): Promise<{ email: strin
   return { email, pendingEmail };
 }
 
-let resendKey: Promise<string | undefined> | null = null;
-function getResendKey() {
-  resendKey ??= (async () => process.env.RESEND_API_KEY ?? (process.env.RESEND_API_KEY_SSM ? await fetchSsm(process.env.RESEND_API_KEY_SSM) : undefined))();
+/** Cached once found; while missing, looked up again at most every 5 minutes. */
+let resendKey: string | undefined;
+let resendMissingAt = 0;
+async function getResendKey(): Promise<string | undefined> {
+  if (resendKey) return resendKey;
+  if (Date.now() - resendMissingAt < 5 * 60_000) return undefined;
+  resendKey = process.env.RESEND_API_KEY ?? (process.env.RESEND_API_KEY_SSM ? await fetchSsm(process.env.RESEND_API_KEY_SSM) : undefined);
+  if (!resendKey) resendMissingAt = Date.now();
   return resendKey;
 }
 
