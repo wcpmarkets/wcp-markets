@@ -139,7 +139,7 @@ function vehicleProblem(a: z.infer<typeof ListingAttributesSchema> | undefined):
   return null;
 }
 
-const ListingSchema = z
+export const ListingSchema = z
   .object({
     id: z.string().uuid(),
     sellerId: z.string().uuid(),
@@ -263,6 +263,7 @@ const ImageUploadSchema = z
   .openapi("ImageUpload");
 
 // Raw DB shape (bigint arrives as string from postgres.js).
+export type ListingRow = Row;
 type Row = {
   id: string;
   seller_id: string;
@@ -323,12 +324,12 @@ async function toListing(r: Row, seller: UserSummary): Promise<z.infer<typeof Li
 }
 
 /** Map rows to the API shape, batch-loading each distinct seller's summary once. */
-async function toListings(db: Sql, rows: Row[]): Promise<z.infer<typeof ListingSchema>[]> {
+export async function toListings(db: Sql, rows: Row[]): Promise<z.infer<typeof ListingSchema>[]> {
   const sellers = await userSummaries(db, rows.map((r) => r.seller_id));
   return Promise.all(rows.map((r) => toListing(r, sellers.get(r.seller_id)!)));
 }
 
-const SELECT = `id, seller_id, lane, category, title, description, price_kobo,
+export const LISTING_SELECT = `id, seller_id, lane, category, title, description, price_kobo,
   currency, negotiable, stock, condition, attributes, location, state, city, image_paths,
   status, created_at, updated_at`;
 
@@ -542,7 +543,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           ${db.json(b.attributes ?? {})},
           ${b.location ?? null}, ${b.state ?? null}, ${b.city ?? null}, ${lat}, ${lng}
         )
-        returning ${db.unsafe(SELECT)}
+        returning ${db.unsafe(LISTING_SELECT)}
       `;
       return c.json((await toListings(db, [rows[0]!]))[0]!, 201);
     },
@@ -582,7 +583,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       const place = locationWhere(db, loc);
 
       const rows = await db<Row[]>`
-        select ${db.unsafe(SELECT)} from public.listings
+        select ${db.unsafe(LISTING_SELECT)} from public.listings
         where status = 'active'
           ${lane ? db`and lane = ${lane}` : db``}
           ${place ? db`and (${place})` : db``}
@@ -670,7 +671,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           : db`order by created_at desc`;
 
       const rows = await db<Row[]>`
-        select ${db.unsafe(SELECT)} from public.listings
+        select ${db.unsafe(LISTING_SELECT)} from public.listings
         where ${where}
         ${order}
         limit ${limit} offset ${offset}
@@ -766,7 +767,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const rows = await db<Row[]>`
-        select ${db.unsafe(SELECT)} from public.listings
+        select ${db.unsafe(LISTING_SELECT)} from public.listings
         where seller_id = ${user.sub}
         order by created_at desc
       `;
@@ -799,7 +800,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const { id } = c.req.valid("param");
       const rows = await db<Row[]>`
-        select ${db.unsafe(SELECT)} from public.listings
+        select ${db.unsafe(LISTING_SELECT)} from public.listings
         where id = ${id} and status = 'active'
       `;
       if (!rows[0]) return c.json({ error: "not_found" }, 404);
@@ -888,7 +889,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       if (Object.keys(cols).length === 0) {
         // Nothing to change — return the current row (owner-scoped).
         const rows = await db<Row[]>`
-          select ${db.unsafe(SELECT)} from public.listings
+          select ${db.unsafe(LISTING_SELECT)} from public.listings
           where id = ${id} and seller_id = ${user.sub}
         `;
         if (!rows[0]) return c.json({ error: "not_found" }, 404);
@@ -898,7 +899,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       const rows = await db<Row[]>`
         update public.listings set ${db(cols)}
         where id = ${id} and seller_id = ${user.sub}
-        returning ${db.unsafe(SELECT)}
+        returning ${db.unsafe(LISTING_SELECT)}
       `;
       if (!rows[0]) return c.json({ error: "not_found" }, 404);
       return c.json((await toListings(db, [rows[0]]))[0]!, 200);

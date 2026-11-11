@@ -17,8 +17,8 @@ import { getPushSender } from "./fcm.js";
  */
 export const NOTIFY_TOPICS = new Set(["deal.created", "deal.transition", "message.created"]);
 
-type Topic = "orders" | "messages";
-type Note = { userId: string; topic: Topic; title: string; body: string; key: string; data: Record<string, string>; tag?: string };
+type Topic = "orders" | "messages" | "watch";
+export type Note = { userId: string; topic: Topic; title: string; body: string; key: string; data: Record<string, string>; tag?: string };
 
 type NotifyMsg = { topic: string; dealId?: string; seq?: number; action?: string; actor?: string; to?: string; messageId?: number };
 
@@ -29,10 +29,10 @@ export async function handleNotifyEvent(db: Sql, msg: NotifyMsg): Promise<void> 
 }
 
 /** ₦8,000 — exact, since these are prices people agreed to. */
-function money(kobo: number | string): string {
+export function money(kobo: number | string): string {
   return `₦${(Number(kobo) / 100).toLocaleString("en-NG", { maximumFractionDigits: 2 })}`;
 }
-function clip(s: string, n: number): string {
+export function clip(s: string, n: number): string {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
@@ -206,9 +206,9 @@ async function forMessage(db: Sql, messageId: number): Promise<Note[]> {
   ];
 }
 
-const CHANNEL: Record<Topic, string> = { orders: "orders", messages: "messages" };
+const CHANNEL: Record<Topic, string> = { orders: "orders", messages: "messages", watch: "watch" };
 
-async function deliver(db: Sql, n: Note): Promise<void> {
+export async function deliver(db: Sql, n: Note): Promise<void> {
   const [claimed] = await db<{ id: number }[]>`
     insert into public.notifications (user_id, dedupe_key, topic, title, body, data)
     values (${n.userId}, ${n.key}, ${n.topic}, ${n.title}, ${n.body}, ${db.json(n.data)})

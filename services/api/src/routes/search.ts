@@ -24,7 +24,7 @@ import { buildSummary, naira, type Filters, type Interpretation, type Lane } fro
  */
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 
-const SearchFiltersSchema = z
+export const SearchFiltersSchema = z
   .object({
     category: z.string().optional(),
     condition: z.enum(CONDITIONS).optional(),

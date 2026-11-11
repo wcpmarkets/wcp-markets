@@ -23,6 +23,7 @@ import { registerContactEmail } from "./routes/contact-email.js";
 import { registerSearch } from "./routes/search.js";
 import { registerPushDevices } from "./routes/push-devices.js";
 import { registerNotifications } from "./routes/notifications.js";
+import { registerWatch } from "./routes/watch.js";
 import { kickOutbox } from "./deals/sqs-relay.js";
 
 /**
@@ -173,6 +174,7 @@ export function createApp() {
   registerContactEmail(app);
   registerPushDevices(app);
   registerNotifications(app);
+  registerWatch(app);
 
   // ── Account recovery + signed-in devices (Phase 3 G) ──────────────────────
   registerRecovery(app);
