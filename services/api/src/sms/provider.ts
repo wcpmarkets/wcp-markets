@@ -46,11 +46,20 @@ class TermiiSms implements SmsSender {
   }
 }
 
+// A missing key is looked up again every 5 minutes (like Paystack/Anthropic/Resend),
+// so adding it in SSM reaches warm Lambdas without a redeploy.
+const RECHECK_MS = 5 * 60_000;
 let sender: Promise<SmsSender> | null = null;
+let mockSince = 0;
 export function getSmsSender(): Promise<SmsSender> {
+  if (sender && mockSince && Date.now() - mockSince > RECHECK_MS) sender = null;
   sender ??= (async () => {
-    const key = process.env.TERMII_API_KEY ?? (process.env.TERMII_API_KEY_SSM ? await fetchSsm(process.env.TERMII_API_KEY_SSM) : undefined);
-    if (!key) return new MockSms();
+    const key = process.env.TERMII_API_KEY ?? (process.env.TERMII_API_KEY_SSM ? await fetchSsm(process.env.TERMII_API_KEY_SSM).catch(() => undefined) : undefined);
+    if (!key) {
+      mockSince = Date.now();
+      return new MockSms();
+    }
+    mockSince = 0;
     return new TermiiSms(key, process.env.TERMII_SENDER_ID ?? "WCPMarkets", (process.env.TERMII_BASE_URL ?? "https://v3.api.termii.com").replace(/\/$/, ""));
   })();
   return sender;
