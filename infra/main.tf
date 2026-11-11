@@ -115,6 +115,12 @@ resource "aws_lambda_function" "api" {
       # Receipt-email confirmations (send-only Resend key; sender domain verified in Resend).
       RESEND_API_KEY_SSM = "/wcp/api/resend-api-key"
       RESEND_FROM        = "WCP Markets <hello@wcpmarkets.com>"
+      # Phase 3 J. Smile ID Biometric KYC (selfie vs the BVN/NIN photo). Until both
+      # parameters exist KYC stays on the mock match; creating them needs no redeploy.
+      # SMILEID_ENV flips to "production" with production keys.
+      SMILEID_PARTNER_ID_SSM = "/wcp/api/smileid-partner-id"
+      SMILEID_API_KEY_SSM    = "/wcp/api/smileid-api-key"
+      SMILEID_ENV            = "sandbox"
       # Push notifications: relay the outbox straight after a write (pushes in seconds,
       # not on the sweeper's next minute). The sweeper still relays anything missed.
       OUTBOX_QUEUE_URL = aws_sqs_queue.deal_events.url
