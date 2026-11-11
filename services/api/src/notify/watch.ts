@@ -61,7 +61,7 @@ export async function handleListingPriced(db: Sql, msg: Priced): Promise<void> {
   const watches = await db<WatchRow[]>`
     select w.id, w.user_id, w.label, w.params, w.ceiling_kobo::text as ceiling_kobo
     from public.watches w
-    where w.user_id <> ${l.seller_id}
+    where w.user_id <> ${l.seller_id} and not w.paused
       and (w.params->>'lane' is null or w.params->>'lane' = ${l.lane})
       and (w.params->>'category' is null or w.params->>'category' = ${l.category})
       and (w.ceiling_kobo is null or w.ceiling_kobo >= ${price})

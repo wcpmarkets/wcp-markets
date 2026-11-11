@@ -5876,7 +5876,58 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /** Switch a watch on or off (20k toggle) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["WatchUpdate"];
+                };
+            };
+            responses: {
+                /** @description Updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Watch"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         trace?: never;
     };
     "/me/watches/{id}/dismiss": {
@@ -7777,6 +7828,7 @@ export interface components {
             label: string;
             /** Format: int64 */
             ceilingKobo: number | null;
+            paused: boolean;
             createdAt: string;
             hits: components["schemas"]["WatchHit"][];
             marketCount: number;
@@ -7796,6 +7848,9 @@ export interface components {
             city?: string;
             /** Format: int64 */
             ceilingKobo?: number;
+        };
+        WatchUpdate: {
+            paused: boolean;
         };
         WatchDismiss: {
             /** Format: uuid */

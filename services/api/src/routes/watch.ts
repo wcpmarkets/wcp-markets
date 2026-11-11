@@ -46,6 +46,8 @@ const WatchSchema = z
     id: z.string().uuid(),
     label: z.string(),
     ceilingKobo: z.number().int().nullable(),
+    /** Switched off (20k toggle): keeps its hits, catches nothing new. */
+    paused: z.boolean(),
     createdAt: z.string(),
     /** Live matches not dismissed, newest first (20k "TRIGGERED"). */
     hits: z.array(WatchHitSchema),
@@ -69,6 +71,7 @@ const WatchCreateSchema = z
     ceilingKobo: z.number().int().positive().optional(),
   })
   .openapi("WatchCreate");
+const WatchUpdateSchema = z.object({ paused: z.boolean() }).openapi("WatchUpdate");
 const DismissSchema = z.object({ listingId: z.string().uuid() }).openapi("WatchDismiss");
 
 /** LISTING_SELECT with each column qualified by the listings alias `l`. */
@@ -82,7 +85,7 @@ const strip = <T extends Record<string, unknown>>(o: T) =>
 /** One watch in the API's shape: its open hits and the market for its search. */
 async function watchOut(
   db: Db,
-  w: { id: string; label: string; params: SearchParams; ceiling_kobo: string | null; created_at: Date | string },
+  w: { id: string; label: string; params: SearchParams; ceiling_kobo: string | null; paused: boolean; created_at: Date | string },
 ): Promise<z.infer<typeof WatchSchema>> {
   const hits = await db<(ListingRow & { hit_price: string; hit_at: Date })[]>`
     select ${db.unsafe(L_COLS)},
@@ -99,6 +102,7 @@ async function watchOut(
     id: w.id,
     label: w.label,
     ceilingKobo: ceiling,
+    paused: w.paused,
     createdAt: iso(w.created_at),
     hits: hits.map((h, i) => ({
       listing: listings[i]!,
@@ -234,8 +238,8 @@ export function registerWatch(app: OpenAPIHono<AuthEnv>) {
     async (c) => {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
-      const rows = await db<{ id: string; label: string; params: SearchParams; ceiling_kobo: string | null; created_at: Date }[]>`
-        select id, label, params, ceiling_kobo::text as ceiling_kobo, created_at from public.watches
+      const rows = await db<{ id: string; label: string; params: SearchParams; ceiling_kobo: string | null; paused: boolean; created_at: Date }[]>`
+        select id, label, params, ceiling_kobo::text as ceiling_kobo, paused, created_at from public.watches
         where user_id = ${c.get("user").sub} order by created_at desc`;
       return c.json({ items: await Promise.all(rows.map((w) => watchOut(db, w))) }, 200);
     },
@@ -269,10 +273,10 @@ export function registerWatch(app: OpenAPIHono<AuthEnv>) {
       // The reading's own place wins over where they were browsing (as search does).
       const place = b.filters.state ? { state: b.filters.state, city: b.filters.city } : { state: b.state, city: b.city };
       const params = strip({ ...b.filters, ...place, lane: b.lane, q: b.keywords, maxPrice: ceiling ?? undefined }) as SearchParams;
-      const [w] = await db<{ id: string; label: string; params: SearchParams; ceiling_kobo: string | null; created_at: Date }[]>`
+      const [w] = await db<{ id: string; label: string; params: SearchParams; ceiling_kobo: string | null; paused: boolean; created_at: Date }[]>`
         insert into public.watches (user_id, label, params, ceiling_kobo)
         values (${uid}, ${b.label}, ${db.json(params as never)}, ${ceiling})
-        returning id, label, params, ceiling_kobo::text as ceiling_kobo, created_at`;
+        returning id, label, params, ceiling_kobo::text as ceiling_kobo, paused, created_at`;
       // What already matches is shown straight away, not pushed (they're looking at it).
       await db`
         insert into public.watch_hits (watch_id, listing_id, price_kobo, notified)
@@ -281,6 +285,37 @@ export function registerWatch(app: OpenAPIHono<AuthEnv>) {
         order by created_at desc limit 20
         on conflict do nothing`;
       return c.json(await watchOut(db, w!), 201);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "patch",
+      path: "/me/watches/{id}",
+      summary: "Switch a watch on or off (20k toggle)",
+      tags: ["saved"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      request: {
+        params: z.object({ id: z.string().uuid() }),
+        body: { required: true, content: { "application/json": { schema: WatchUpdateSchema } } },
+      },
+      responses: {
+        200: { description: "Updated", content: { "application/json": { schema: WatchSchema } } },
+        401: { description: "Unauthorized" },
+        404: err("Not found"),
+        503: err("Database unavailable"),
+      },
+    }),
+    async (c) => {
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const [w] = await db<{ id: string; label: string; params: SearchParams; ceiling_kobo: string | null; paused: boolean; created_at: Date }[]>`
+        update public.watches set paused = ${c.req.valid("json").paused}
+        where id = ${c.req.valid("param").id} and user_id = ${c.get("user").sub}
+        returning id, label, params, ceiling_kobo::text as ceiling_kobo, paused, created_at`;
+      if (!w) return c.json({ error: "not_found" }, 404);
+      return c.json(await watchOut(db, w), 200);
     },
   );
 

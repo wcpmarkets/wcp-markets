@@ -12,7 +12,7 @@ import { fetchSsm } from "../src/secrets.js";
  *      listing above the ceiling isn't caught, re-priced under it is — once, pushed
  *      "Watch caught one: …"; the market min ignores the ceiling; dismiss hides it.
  *   C. the in-app list carries listingId under topic 'watch'.
- *   D. never your own listing; delete stops the watch.
+ *   D. never your own listing; a switched-off watch catches nothing; delete stops it.
  */
 function loadEnv(file: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -119,6 +119,13 @@ async function main() {
     const dis = await fetch(`${API}/me/watches/${w.id}/dismiss`, { method: "POST", headers: H(buyer.token), body: JSON.stringify({ listingId: l2 }) });
     const after = (await (await fetch(`${API}/me/watches`, { headers: H(buyer.token) })).json()) as typeof list;
     check("dismiss hides it", dis.status === 204 && !after.items.find((x) => x.id === w.id)?.hits.some((h) => h.listing.id === l2));
+
+    const pz = await fetch(`${API}/me/watches/${w.id}`, { method: "PATCH", headers: H(buyer.token), body: JSON.stringify({ paused: true }) });
+    check("switch off → paused", pz.status === 200 && ((await pz.json()) as { paused: boolean }).paused === true);
+    const l3 = await listing(seller.token, `Tecno Spark ${word} quiet`, 3_000_000);
+    await sleep(4000);
+    const [quiet] = await sql`select 1 from public.watch_hits where watch_id = ${w.id} and listing_id = ${l3}`;
+    check("a paused watch catches nothing new", !quiet);
 
     console.log("C. in-app list");
     const page = (await (await fetch(`${API}/me/notifications?topic=watch`, { headers: H(buyer.token) })).json()) as { items: { topic: string; listingId: string | null; title: string }[] };
