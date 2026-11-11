@@ -15,7 +15,7 @@ import { deleteStorageObject, getServiceKey, LISTING_IMAGES_BUCKET } from "../su
  *  - gone: addresses, saved items, watches, push devices, notifications, receipt email,
  *    payout bank account, blocks, recovery requests, staff roles, verification attempts;
  *    the avatar and KYC selfie files; photos of listings that never sold;
- *  - listings that never sold are taken down ('removed'); open quote requests closed;
+ *  - listings that never sold are taken down ('archived'); open quote requests closed;
  *  - the profile becomes "Deleted user" with every personal field cleared;
  *  - every session is revoked, and Supabase soft-deletes the sign-in account (phone and
  *    email scrubbed — the number can sign up afresh as a new account).
@@ -131,7 +131,12 @@ export function registerAccount(app: OpenAPIHono<AuthEnv>) {
         const [k] = await q<{ selfie_path: string | null }[]>`select selfie_path from public.kyc_verifications where user_id = ${uid}`;
         const unsold = await q<{ image_paths: string[] | null }[]>`
           select image_paths from public.listings where seller_id = ${uid} and status <> 'sold'`;
-        await q`update public.listings set status = 'removed', image_paths = '{}', updated_at = now()
+        // Taken down the way a seller takes one down ('archived'): 'removed' and
+        // 'under_review' belong to moderation (listings_moderation_guard), so a listing
+        // already there keeps its status — it loses its photos all the same.
+        await q`update public.listings set status = 'archived', updated_at = now()
+                where seller_id = ${uid} and status in ('draft', 'active')`;
+        await q`update public.listings set image_paths = '{}', updated_at = now()
                 where seller_id = ${uid} and status <> 'sold'`;
         await q`update public.quote_requests set status = 'closed', updated_at = now()
                 where (buyer_id = ${uid} or seller_id = ${uid}) and status = 'open'`;

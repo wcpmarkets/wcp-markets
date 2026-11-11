@@ -88,7 +88,7 @@ async function main() {
       select display_name, phone, bio, deleted_at from public.profiles where id = ${leaver.id}`;
     check("profile → Deleted user, cleared", p?.display_name === "Deleted user" && p.bio === null && p.phone === null && p.deleted_at !== null, JSON.stringify(p));
     const [l] = await sql<{ status: string; image_paths: string[] }[]>`select status, image_paths from public.listings where id = ${mine}`;
-    check("unsold listing removed", l?.status === "removed" && l.image_paths.length === 0, l?.status);
+    check("unsold listing taken down", l?.status === "archived" && l.image_paths.length === 0, l?.status);
     const pub = await fetch(`${API}/listings/${mine}`);
     check("…and no longer public", pub.status === 404, `${pub.status}`);
     const counts = await sql<{ t: string; n: number }[]>`
