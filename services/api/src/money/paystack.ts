@@ -12,10 +12,18 @@ import { fetchSsm } from "../secrets.js";
 const BASE = (process.env.PAYSTACK_BASE_URL ?? "https://api.paystack.co").replace(/\/$/, "");
 
 let key: Promise<string | undefined> | null = null;
+/** A missing key is re-looked-up after this long, so adding it reaches warm Lambdas too. */
+let missingAt = 0;
+const RECHECK_MS = 5 * 60_000;
 export function paystackKey(): Promise<string | undefined> {
-  key ??= (async () =>
-    process.env.PAYSTACK_SECRET_KEY ??
-    (await fetchSsm(process.env.PAYSTACK_SECRET_KEY_SSM ?? "/wcp/api/paystack-secret-key")))();
+  if (key && missingAt && Date.now() - missingAt >= RECHECK_MS) key = null;
+  key ??= (async () => {
+    const k =
+      process.env.PAYSTACK_SECRET_KEY ??
+      (await fetchSsm(process.env.PAYSTACK_SECRET_KEY_SSM ?? "/wcp/api/paystack-secret-key"));
+    missingAt = k ? 0 : Date.now();
+    return k;
+  })();
   return key;
 }
 export async function paystackConfigured(): Promise<boolean> {
