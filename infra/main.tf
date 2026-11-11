@@ -100,7 +100,7 @@ resource "aws_lambda_function" "api" {
       # on the keyword interpreter and photo search answers 503; creating it needs
       # only a cold start. Model and daily call cap are tunable here.
       ANTHROPIC_API_KEY_SSM = "/wcp/api/anthropic-api-key"
-      SEARCH_AI_MODEL       = "claude-opus-5-5"
+      SEARCH_AI_MODEL       = "claude-haiku-5-5"
       SEARCH_AI_DAILY_CAP   = "3000"
     }
   }

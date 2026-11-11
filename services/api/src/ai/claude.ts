@@ -17,10 +17,11 @@ let missingSince = 0;
 const RECHECK_MS = 5 * 60_000;
 
 /**
- * Overridable so the cost/quality trade can be changed without a code change
- * (e.g. SEARCH_AI_MODEL=claude-haiku-5-5). Default: Claude Opus 5.5 at low effort.
+ * Overridable so the cost/quality trade can be changed without a code change.
+ * Claude Haiku 5.5 by default (and in infra): reading a search is extraction, and
+ * Opus 5.5 at low effort took 5-9s a query against a 9s timeout.
  */
-export const SEARCH_MODEL = process.env.SEARCH_AI_MODEL ?? "claude-opus-5-5";
+export const SEARCH_MODEL = process.env.SEARCH_AI_MODEL ?? "claude-haiku-5-5";
 
 export async function claude(): Promise<Anthropic | null> {
   if (client) return client;

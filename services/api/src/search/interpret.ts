@@ -220,6 +220,8 @@ function finish(raw: RawReading, source: "ai" | "rules", itemName?: string | nul
 
 type Content = Anthropic.Beta.Messages.BetaContentBlockParam[];
 
+const HAS_FALLBACK = !SEARCH_MODEL.startsWith("claude-haiku");
+
 /** One Claude call. Null on any failure — the caller decides what to fall back to. */
 async function ask(content: Content): Promise<Reading | null> {
   const c = await claude();
@@ -228,9 +230,9 @@ async function ask(content: Content): Promise<Reading | null> {
     const res = await c.beta.messages.create({
       model: SEARCH_MODEL,
       max_tokens: 4000,
-      // A declined reading is rerouted server-side instead of failing the search.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      // A declined reading is rerouted server-side instead of failing the search —
+      // where the model has a fallback (Haiku has none; a refusal there drops to rules).
+      ...(HAS_FALLBACK ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       output_config: { effort: "low", format: zodOutputFormat(WireSchema) },
       system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content }],
