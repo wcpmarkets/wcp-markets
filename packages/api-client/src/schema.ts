@@ -3537,6 +3537,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/deals/{id}/cancel-refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Seller cancels a paid deal before hand-off and refunds the buyer */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CancelRefundRequest"];
+                };
+            };
+            responses: {
+                /** @description Cancelled; refund on its way */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Deal"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not cancellable now (not paid, or already handed off) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/deals/{id}/confirm": {
         parameters: {
             query?: never;
@@ -6549,6 +6623,9 @@ export interface components {
             priceKobo?: number;
             qty?: number;
             milestones?: components["schemas"]["StagePlan"][];
+        };
+        CancelRefundRequest: {
+            reason?: string;
         };
         Message: {
             id: number;

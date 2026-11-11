@@ -16,6 +16,10 @@ import { isBlockedEitherWay } from "../profiles/summary.js";
 
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 
+const CancelRefundRequestSchema = z
+  .object({ /** Shown to the buyer in the deal history. */ reason: z.string().max(200).optional() })
+  .openapi("CancelRefundRequest");
+
 /** One stage of a staged quote as proposed (22c-quotebuild): what it covers + its share. */
 export const StagePlanSchema = z
   .object({
@@ -582,6 +586,56 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         actor: "SELLER",
         actorId: user.sub,
         action: "hand_off",
+        idempotencyKey: idem(c),
+      });
+      if (!r.ok) {
+        if (r.code === "not_found") return c.json({ error: "not_found" }, 404);
+        return c.json({ error: r.code === "illegal" ? "illegal_transition" : "conflict" }, 409);
+      }
+      return c.json(await dealOut(db, r.deal, user.sub), 200);
+    },
+  );
+
+  // ── POST /deals/{id}/cancel-refund — seller can't fulfil a paid deal ────────
+  // PAID_IN_ESCROW → REFUNDED (cancel_refund): the buyer gets back what the hold
+  // booked (principal + escrow fee; the processing fee is the provider's). Only before
+  // hand-off — after it, the buyer has the item and a refund goes through a dispute.
+  // Stock isn't put back: a seller who can't fulfil usually no longer has the item.
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/deals/{id}/cancel-refund",
+      summary: "Seller cancels a paid deal before hand-off and refunds the buyer",
+      tags: ["deals"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      request: {
+        params: z.object({ id: z.string().uuid() }),
+        body: { required: false, content: { "application/json": { schema: CancelRefundRequestSchema } } },
+      },
+      responses: {
+        200: { description: "Cancelled; refund on its way", content: { "application/json": { schema: DealSchema } } },
+        401: { description: "Unauthorized" },
+        404: { description: "Not found" },
+        409: { description: "Not cancellable now (not paid, or already handed off)", content: { "application/json": { schema: ErrorSchema } } },
+        503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
+      },
+    }),
+    async (c) => {
+      const user = c.get("user");
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const { id } = c.req.valid("param");
+      const body = (c.req.valid("json") as z.infer<typeof CancelRefundRequestSchema> | undefined) ?? {};
+      const [deal] = await db<{ seller_id: string }[]>`select seller_id from public.deals where id = ${id}`;
+      if (!deal || deal.seller_id !== user.sub) return c.json({ error: "not_found" }, 404);
+
+      const r = await transition(db, {
+        dealId: id,
+        actor: "SELLER",
+        actorId: user.sub,
+        action: "cancel_refund",
+        reason: body.reason?.trim().slice(0, 200) || "seller_cancelled",
         idempotencyKey: idem(c),
       });
       if (!r.ok) {
