@@ -3,6 +3,7 @@ import { fetchSsm } from "./secrets.js";
 import { getDb } from "./db.js";
 import { dealRail, refundLatePayment, requestRefund, requestTransfer } from "./money/paystack-ops.js";
 import { handleNotifyEvent, NOTIFY_TOPICS } from "./notify/push.js";
+import { handleListingPriced, WATCH_TOPICS } from "./notify/watch.js";
 
 /**
  * The escrow orchestrator — an SQS consumer on the deal-events queue (fed by the
@@ -40,6 +41,10 @@ export const handler = async (event: SqsEvent) => {
         sellerId?: string;
         reference?: string;
       };
+      if (WATCH_TOPICS.has(msg.topic)) {
+        await handleListingPriced(await needDb(), msg as Parameters<typeof handleListingPriced>[1]);
+        continue;
+      }
       if (NOTIFY_TOPICS.has(msg.topic)) {
         await handleNotifyEvent(await needDb(), msg as Parameters<typeof handleNotifyEvent>[1]);
         continue;

@@ -18,9 +18,11 @@ const NotificationSchema = z
     topic: z.enum(TOPICS),
     title: z.string(),
     body: z.string(),
-    /** What a tap opens: a conversation (preferred) or a deal. */
+    /** What a tap opens: a conversation (preferred), a deal, or a listing. */
     conversationId: z.string().uuid().nullable(),
     dealId: z.string().uuid().nullable(),
+    /** A price drop or a watch hit: opens the listing. */
+    listingId: z.string().uuid().nullable(),
     read: z.boolean(),
     createdAt: z.string(),
   })
@@ -101,6 +103,7 @@ export function registerNotifications(app: OpenAPIHono<AuthEnv>) {
             body: r.body,
             conversationId: r.data?.conversationId ?? null,
             dealId: r.data?.dealId ?? null,
+            listingId: r.data?.listingId ?? null,
             read: r.read_at != null,
             createdAt: new Date(r.created_at).toISOString(),
           })),
