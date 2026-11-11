@@ -3690,12 +3690,28 @@
               "bvn",
               "nin"
             ]
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "lastOutcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "attention",
+              "block",
+              "error"
+            ]
           }
         },
         "required": [
           "level",
           "matched",
-          "idType"
+          "idType",
+          "pending",
+          "lastOutcome"
         ]
       },
       "KycVerify": {
@@ -3721,6 +3737,106 @@
         "required": [
           "idType",
           "idNumber"
+        ]
+      },
+      "KycSession": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "smileid",
+              "mock"
+            ]
+          },
+          "attemptId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "token": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "partnerId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sandbox": {
+            "type": "boolean"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "smileIdType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "provider",
+          "attemptId",
+          "token",
+          "partnerId",
+          "sandbox",
+          "userId",
+          "country",
+          "smileIdType"
+        ]
+      },
+      "KycSessionRequest": {
+        "type": "object",
+        "properties": {
+          "idType": {
+            "type": "string",
+            "enum": [
+              "bvn",
+              "nin"
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "pattern": "^\\d{11}$"
+          },
+          "givenNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "lastName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "idType",
+          "idNumber",
+          "givenNames",
+          "lastName"
+        ]
+      },
+      "KycSubmitted": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "pattern": "^job_[0-9a-z]{20,40}$"
+          }
+        },
+        "required": [
+          "jobId"
         ]
       },
       "Payout": {
@@ -9132,6 +9248,16 @@
           "401": {
             "description": "Unauthorized"
           },
+          "409": {
+            "description": "use_smileid — Smile ID is configured; start a check with POST /kyc/session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -9179,6 +9305,156 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kyc/session": {
+      "post": {
+        "summary": "Start an identity check: a Smile ID token for the SDK (or 'mock')",
+        "tags": [
+          "kyc"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KycSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "smileid_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kyc/attempts/{id}/submitted": {
+      "post": {
+        "summary": "The app submitted a Smile ID check; returns the KYC status",
+        "tags": [
+          "kyc"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KycSubmitted"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "KYC status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "already_submitted (a different job)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "503": {
             "description": "Database unavailable",

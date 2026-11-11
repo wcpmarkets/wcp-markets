@@ -4495,6 +4495,15 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description use_smileid — Smile ID is configured; start a check with POST /kyc/session */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Rate limited */
                 429: {
                     headers: {
@@ -4567,6 +4576,163 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kyc/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start an identity check: a Smile ID token for the SDK (or 'mock') */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["KycSessionRequest"];
+                };
+            };
+            responses: {
+                /** @description Session */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["KycSession"];
+                    };
+                };
+                /** @description Bad request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description smileid_unavailable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kyc/attempts/{id}/submitted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The app submitted a Smile ID check; returns the KYC status */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["KycSubmitted"];
+                };
+            };
+            responses: {
+                /** @description KYC status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["KycStatus"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description already_submitted (a different job) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -7019,12 +7185,37 @@ export interface components {
             matched: boolean | null;
             /** @enum {string|null} */
             idType: "bvn" | "nin" | null;
+            pending: boolean;
+            /** @enum {string|null} */
+            lastOutcome: "attention" | "block" | "error" | null;
         };
         KycVerify: {
             /** @enum {string} */
             idType: "bvn" | "nin";
             idNumber: string;
             selfiePath?: string;
+        };
+        KycSession: {
+            /** @enum {string} */
+            provider: "smileid" | "mock";
+            /** Format: uuid */
+            attemptId: string | null;
+            token: string | null;
+            partnerId: string | null;
+            sandbox: boolean;
+            userId: string;
+            country: string;
+            smileIdType: string | null;
+        };
+        KycSessionRequest: {
+            /** @enum {string} */
+            idType: "bvn" | "nin";
+            idNumber: string;
+            givenNames: string;
+            lastName: string;
+        };
+        KycSubmitted: {
+            jobId: string;
         };
         Payout: {
             /** Format: uuid */
