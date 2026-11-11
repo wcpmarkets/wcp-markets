@@ -52,7 +52,8 @@ const SearchFiltersSchema = z
 
 const SearchAlternativeSchema = z
   .object({
-    lane: z.enum(LANES),
+    /** Null = every lane (a 21a suggestion like "Browse everything"). */
+    lane: z.enum(LANES).nullable(),
     label: z.string(),
     keywords: z.string(),
     filters: SearchFiltersSchema,
@@ -233,7 +234,7 @@ async function suggest(db: Db, lane: Lane | null, keywords: string, f: Filters, 
     if (out.length >= 3) return null;
     const r = await countFor(db, paramsFor(l, k, nf, sc));
     if (r.count > 0) {
-      out.push({ lane: l ?? "goods", label, keywords: k, filters: nf, ...r });
+      out.push({ lane: l, label, keywords: k, filters: nf, ...r });
       message ??= why;
     }
     return r;
@@ -250,9 +251,9 @@ async function suggest(db: Db, lane: Lane | null, keywords: string, f: Filters, 
     if (r.count > 0 && r.fromKobo != null) {
       message = `Nothing under **${naira(f.maxPrice)}** right now — the cheapest match is **${naira(r.fromKobo)}**.`;
       const atCheapest = await countFor(db, paramsFor(lane, keywords, { ...f, maxPrice: r.fromKobo }, scope));
-      out.push({ lane: lane ?? "goods", label: `Raise budget to ${naira(r.fromKobo)}`, keywords, filters: { ...f, maxPrice: r.fromKobo }, ...atCheapest });
+      out.push({ lane, label: `Raise budget to ${naira(r.fromKobo)}`, keywords, filters: { ...f, maxPrice: r.fromKobo }, ...atCheapest });
       // "Any price" only earns a row when it shows more than the raised budget does.
-      if (r.count > atCheapest.count) out.push({ lane: lane ?? "goods", label: "Any price", keywords, filters: without("maxPrice"), ...r });
+      if (r.count > atCheapest.count) out.push({ lane, label: "Any price", keywords, filters: without("maxPrice"), ...r });
     }
   }
   if (f.minPrice != null) await tryOne("Any price", lane, keywords, without("minPrice", "maxPrice"), `Nothing over **${naira(f.minPrice)}** right now.`);
@@ -280,8 +281,10 @@ async function suggest(db: Db, lane: Lane | null, keywords: string, f: Filters, 
 
   // 4. The words: everything in this lane and filter set, whatever it's called.
   if (keywords) {
-    const label = buildSummary(lane, f, "").replace(/^Showing /, "All ").replace(/\*\*/g, "");
-    await tryOne(label, lane, "", f, `Nothing matches **“${keywords}”** with these filters.`);
+    const bare = !lane && Object.keys(f).length === 0;
+    // "All apartments for rent · Lekki"; with nothing else set, just "Browse everything".
+    const label = bare ? "Browse everything" : buildSummary(lane, f, "").replace(/^Showing /, "All ").replace(/\*\*/g, "");
+    await tryOne(label, lane, "", f, bare ? `Nothing matches **“${keywords}”** right now.` : `Nothing matches **“${keywords}”** with these filters.`);
   }
 
   return { message: message ?? (out.length ? "Nothing matches all of that right now." : "Nothing matches that right now — try fewer words or a wider area."), suggestions: out.slice(0, 3) };

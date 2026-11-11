@@ -1927,7 +1927,10 @@
         "type": "object",
         "properties": {
           "lane": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "enum": [
               "goods",
               "property",

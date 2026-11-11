@@ -6156,8 +6156,8 @@ export interface components {
             availability?: "today" | "this_week" | "emergency";
         };
         SearchAlternative: {
-            /** @enum {string} */
-            lane: "goods" | "property" | "vehicles" | "services";
+            /** @enum {string|null} */
+            lane: "goods" | "property" | "vehicles" | "services" | null;
             label: string;
             keywords: string;
             filters: components["schemas"]["SearchFilters"];
