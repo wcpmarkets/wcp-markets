@@ -59,11 +59,15 @@ export function callbackUrl(): string {
   return `${base}/payments/paystack/return`;
 }
 
-/** Paystack needs an email; phone-only accounts get a stable, non-routable stand-in. */
+/**
+ * Paystack needs an email; phone-only accounts get a stable stand-in on our own domain
+ * (Paystack rejects reserved TLDs like .invalid). Receipts to it bounce unless a
+ * catch-all for customers.wcpmarkets.com is set up.
+ */
 async function customerEmail(db: Sql, userId: string): Promise<string> {
   const [u] = await db<{ email: string | null }[]>`select nullif(email, '') as email from auth.users where id = ${userId}`;
   if (u?.email) return u.email;
-  const domain = process.env.PAYSTACK_CUSTOMER_EMAIL_DOMAIN ?? "customers.wcpmarkets.invalid";
+  const domain = process.env.PAYSTACK_CUSTOMER_EMAIL_DOMAIN ?? "customers.wcpmarkets.com";
   return `u${userId.replace(/-/g, "")}@${domain}`;
 }
 
