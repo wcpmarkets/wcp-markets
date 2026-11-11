@@ -2,13 +2,15 @@ import { MockEscrowProvider } from "@wcp/escrow";
 import { fetchSsm } from "./secrets.js";
 import { getDb } from "./db.js";
 import { dealRail, refundLatePayment, requestRefund, requestTransfer } from "./money/paystack-ops.js";
+import { handleNotifyEvent, NOTIFY_TOPICS } from "./notify/push.js";
 
 /**
  * The escrow orchestrator — an SQS consumer on the deal-events queue (fed by the
  * sweeper relaying the transactional outbox). It turns escrow COMMANDS (create_hold,
  * refund) into provider calls, then POSTs the provider's signed webhook back to the
  * API's /webhooks/escrow — exercising the exact async hold→confirm path the real
- * partner will drive. Non-escrow messages (deal.transition, …) are acked untouched.
+ * partner will drive. deal.created / deal.transition / message.created become push
+ * notifications (notify/push.ts); anything else is acked untouched.
  *
  * Partial-batch failures: a failed record is reported so ONLY it is retried (the rest
  * are deleted). Provider calls are idempotent on a dealId-derived key, and the
@@ -38,6 +40,10 @@ export const handler = async (event: SqsEvent) => {
         sellerId?: string;
         reference?: string;
       };
+      if (NOTIFY_TOPICS.has(msg.topic)) {
+        await handleNotifyEvent(await needDb(), msg as Parameters<typeof handleNotifyEvent>[1]);
+        continue;
+      }
       const part = msg.part || undefined;
       const suffix = part ? `:${part}` : "";
       // Paystack deals (3H): refunds and payouts are real Paystack calls, settled by

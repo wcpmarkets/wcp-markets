@@ -21,6 +21,8 @@ import { registerSessions } from "./routes/sessions.js";
 import { registerPayoutAccounts } from "./routes/payout-accounts.js";
 import { registerContactEmail } from "./routes/contact-email.js";
 import { registerSearch } from "./routes/search.js";
+import { registerPushDevices } from "./routes/push-devices.js";
+import { kickOutbox } from "./deals/sqs-relay.js";
 
 /**
  * The WCP API — one Hono app serving the whole contract'd REST surface, defined
@@ -35,6 +37,15 @@ export function createApp() {
   const app = new OpenAPIHono<AuthEnv>();
 
   const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
+
+  // After a successful write, relay what it put in the outbox now (a push, an escrow
+  // command) rather than on the sweeper's next minute. Best-effort; never fails the request.
+  app.use("*", async (c, next) => {
+    await next();
+    if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS" || c.res.status >= 400) return;
+    const db = await getDb();
+    if (db) await kickOutbox(db);
+  });
 
   // ── GET /health ───────────────────────────────────────────────────────────
   const HealthSchema = z
@@ -159,6 +170,7 @@ export function createApp() {
   registerKyc(app);
   registerPayoutAccounts(app);
   registerContactEmail(app);
+  registerPushDevices(app);
 
   // ── Account recovery + signed-in devices (Phase 3 G) ──────────────────────
   registerRecovery(app);

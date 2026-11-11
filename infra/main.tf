@@ -55,6 +55,16 @@ resource "aws_iam_role_policy" "api_ssm" {
   })
 }
 
+# The API relays the outbox right after a write (push notifications) — send only.
+resource "aws_iam_role_policy" "api_outbox_send" {
+  name = "${local.name}-outbox-send"
+  role = aws_iam_role.api.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = ["sqs:SendMessage"], Resource = aws_sqs_queue.deal_events.arn }]
+  })
+}
+
 # ── Log group (explicit, so we control retention from day one) ──────────────
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/aws/lambda/${local.name}"
@@ -105,6 +115,9 @@ resource "aws_lambda_function" "api" {
       # Receipt-email confirmations (send-only Resend key; sender domain verified in Resend).
       RESEND_API_KEY_SSM = "/wcp/api/resend-api-key"
       RESEND_FROM        = "WCP Markets <hello@wcpmarkets.com>"
+      # Push notifications: relay the outbox straight after a write (pushes in seconds,
+      # not on the sweeper's next minute). The sweeper still relays anything missed.
+      OUTBOX_QUEUE_URL = aws_sqs_queue.deal_events.url
     }
   }
 
@@ -412,6 +425,9 @@ resource "aws_lambda_function" "consumer" {
       # Phase 3 H: Paystack refunds/transfers are recorded against the deal.
       DATABASE_URL_SSM        = "/wcp/api/database-url"
       PAYSTACK_SECRET_KEY_SSM = "/wcp/api/paystack-secret-key"
+      # Push notifications: a Firebase service-account JSON. Until it exists pushes are
+      # decided and logged as 'mocked'; adding it is picked up within 5 minutes.
+      FCM_SERVICE_ACCOUNT_SSM = "/wcp/api/fcm-service-account"
     }
   }
 

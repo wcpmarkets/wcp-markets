@@ -2,9 +2,9 @@ import { getDb } from "./db.js";
 import {
   fireDueDeadlines,
   relayOutbox,
-  type BatchRelayer,
   type FireResult,
 } from "./deals/sweeper.js";
+import { buildSqsSender } from "./deals/sqs-relay.js";
 import { reconcileAndRecord } from "./money/reconcile.js";
 import { completeDueRecoveries } from "./recovery/service.js";
 import { expireStaleCheckouts } from "./money/checkout.js";
@@ -102,36 +102,3 @@ export const handler = async () => {
   if (errors.length) throw new AggregateError(errors, "[sweeper] one or more jobs failed");
   return { ok: true as const, timers, relay };
 };
-
-/** SQS SendMessageBatch sender (≤10/call) with tight timeouts so one hung send can't
- * eat the 50s Lambda budget. AWS SDK is provided by the Lambda runtime (externalized
- * in the bundle). */
-async function buildSqsSender(queueUrl: string): Promise<BatchRelayer> {
-  const { SQSClient, SendMessageBatchCommand } = await import("@aws-sdk/client-sqs");
-  const sqs = new SQSClient({
-    maxAttempts: 2,
-    requestHandler: { requestTimeout: 3000, connectionTimeout: 1000 },
-  });
-  return async (msgs) => {
-    try {
-      const res = await sqs.send(
-        new SendMessageBatchCommand({
-          QueueUrl: queueUrl,
-          Entries: msgs.map((m) => ({
-            Id: String(m.id),
-            MessageBody: JSON.stringify({ topic: m.topic, ...(m.payload as object) }),
-          })),
-        }),
-      );
-      const okIds = (res.Successful ?? []).map((s) => Number(s.Id));
-      const failed = (res.Failed ?? []).map((f) => ({
-        id: Number(f.Id),
-        error: `${f.Code ?? "Unknown"}: ${f.Message ?? ""}`,
-      }));
-      return { okIds, failed };
-    } catch (e) {
-      // Whole-batch failure (network/timeout): every row is a failure → attempts bump.
-      return { okIds: [], failed: msgs.map((m) => ({ id: m.id, error: String(e).slice(0, 200) })) };
-    }
-  };
-}
