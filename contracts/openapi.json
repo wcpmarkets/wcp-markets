@@ -105,6 +105,18 @@
               "null"
             ]
           },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pendingEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "displayName": {
             "type": [
               "string",
@@ -160,6 +172,8 @@
         "required": [
           "userId",
           "phone",
+          "email",
+          "pendingEmail",
           "displayName",
           "verificationLevel",
           "storeName",
@@ -3862,6 +3876,38 @@
         "required": [
           "bankCode",
           "accountNumber"
+        ]
+      },
+      "ContactEmail": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "verificationSent": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "email",
+          "verified",
+          "verificationSent"
+        ]
+      },
+      "ContactEmailRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email"
+          }
+        },
+        "required": [
+          "email"
         ]
       },
       "RecoveryOption": {
@@ -9269,6 +9315,83 @@
           },
           "502": {
             "description": "Paystack unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/email": {
+      "put": {
+        "summary": "Save a receipt/contact email (unconfirmed until its emailed link is followed)",
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactEmailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactEmail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a usable address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "Already another account's email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many changes",
             "content": {
               "application/json": {
                 "schema": {

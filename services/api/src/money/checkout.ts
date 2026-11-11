@@ -1,3 +1,4 @@
+import { emailsFor, UNDELIVERABLE } from "../routes/contact-email.js";
 import { randomBytes } from "node:crypto";
 import type { Sql } from "../deals/commands.js";
 import { transition } from "../deals/commands.js";
@@ -60,16 +61,19 @@ export function callbackUrl(): string {
 }
 
 /**
- * Paystack needs an email; phone-only accounts get a stable stand-in on our own domain
- * (Paystack rejects reserved TLDs like .invalid). Receipts to it bounce unless a
- * catch-all for customers.wcpmarkets.com is set up.
+ * The email Paystack gets (it requires one, and keys customers by it — so it must be
+ * unique per buyer): the account's confirmed email; else one given at checkout and not
+ * yet confirmed; else a per-buyer plus-address on our support mailbox
+ * (cx+u<id>@wcpmarkets.com), so receipts for phone-only buyers land with us, not a
+ * stranger. Reserved endings (the clitest+ps-…@wcp-test.local accounts) fail Paystack's
+ * check, so they're skipped.
  */
 async function customerEmail(db: Sql, userId: string): Promise<string> {
+  const { email, pendingEmail } = await emailsFor(db, userId);
   const [u] = await db<{ email: string | null }[]>`select nullif(email, '') as email from auth.users where id = ${userId}`;
-  // Reserved TLDs (e.g. the clitest+ps-…@wcp-test.local accounts) fail Paystack's check.
-  if (u?.email && !/\.(local|invalid|test|example|localhost)$/i.test(u.email)) return u.email;
-  const domain = process.env.PAYSTACK_CUSTOMER_EMAIL_DOMAIN ?? "customers.wcpmarkets.com";
-  return `u${userId.replace(/-/g, "")}@${domain}`;
+  for (const e of [email, pendingEmail, u?.email]) if (e && !UNDELIVERABLE.test(e)) return e;
+  const [local, domain] = (process.env.PAYSTACK_PLACEHOLDER_MAILBOX ?? "cx@wcpmarkets.com").split("@");
+  return `${local}+u${userId.replace(/-/g, "")}@${domain}`;
 }
 
 /**

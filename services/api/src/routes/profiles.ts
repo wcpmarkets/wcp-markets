@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { emailsFor } from "./contact-email.js";
 import { auth, verifyAccessToken, type AuthEnv, type AuthUser } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import type { Sql } from "../deals/commands.js";
@@ -39,6 +40,10 @@ const MeSchema = z
   .object({
     userId: z.string(),
     phone: z.string().nullable(),
+    /** The account's confirmed email (sign-in / recovery), if any. */
+    email: z.string().nullable(),
+    /** An email given at checkout but not yet confirmed by its link. */
+    pendingEmail: z.string().nullable(),
     displayName: z.string().nullable(),
     verificationLevel: z.number().int(),
     storeName: z.string().nullable(),
@@ -166,11 +171,14 @@ type ProfileRow = {
 const PROFILE_COLS = `phone, display_name, verification_level, store_name, bio, avatar_path,
   state, city, notification_prefs, show_last_seen, personalise_search, created_at`;
 
-async function toMe(user: AuthUser, p: ProfileRow): Promise<z.infer<typeof MeSchema>> {
+async function toMe(db: Sql, user: AuthUser, p: ProfileRow): Promise<z.infer<typeof MeSchema>> {
   const prefs = p.notification_prefs ?? DEFAULT_PREFS;
+  const { email, pendingEmail } = await emailsFor(db, user.sub);
   return {
     userId: user.sub,
     phone: p.phone,
+    email,
+    pendingEmail,
     displayName: p.display_name,
     verificationLevel: p.verification_level,
     storeName: p.store_name,
@@ -224,7 +232,7 @@ export function registerProfiles(app: OpenAPIHono<AuthEnv>) {
       const user = c.get("user");
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
-      return c.json(await toMe(user, await ensureProfile(db, user)), 200);
+      return c.json(await toMe(db, user, await ensureProfile(db, user)), 200);
     },
   );
 
@@ -280,7 +288,7 @@ export function registerProfiles(app: OpenAPIHono<AuthEnv>) {
         where id = ${user.sub}
         returning ${db.unsafe(PROFILE_COLS)}
       `;
-      return c.json(await toMe(user, rows[0]!), 200);
+      return c.json(await toMe(db, user, rows[0]!), 200);
     },
   );
 

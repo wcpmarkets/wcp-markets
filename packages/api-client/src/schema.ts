@@ -4895,6 +4895,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save a receipt/contact email (unconfirmed until its emailed link is followed) */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ContactEmailRequest"];
+                };
+            };
+            responses: {
+                /** @description Saved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ContactEmail"];
+                    };
+                };
+                /** @description Not a usable address */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Already another account's email */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many changes */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/recovery": {
         parameters: {
             query?: never;
@@ -5722,6 +5805,8 @@ export interface components {
         Me: {
             userId: string;
             phone: string | null;
+            email: string | null;
+            pendingEmail: string | null;
             displayName: string | null;
             verificationLevel: number;
             storeName: string | null;
@@ -6620,6 +6705,15 @@ export interface components {
         SavePayoutAccountRequest: {
             bankCode: string;
             accountNumber: string;
+        };
+        ContactEmail: {
+            email: string;
+            verified: boolean;
+            verificationSent: boolean;
+        };
+        ContactEmailRequest: {
+            /** Format: email */
+            email: string;
         };
         RecoveryOption: {
             id: string;

@@ -9,7 +9,7 @@ import { fetchSsm } from "./secrets.js";
  */
 let serviceKey: string | null | undefined; // undefined = not tried; null = none
 
-async function getServiceKey(): Promise<string | null> {
+export async function getServiceKey(): Promise<string | null> {
   if (serviceKey !== undefined) return serviceKey;
   let key = process.env.SUPABASE_SECRET_KEY;
   const ssmName = process.env.SUPABASE_SECRET_KEY_SSM;

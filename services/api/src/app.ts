@@ -19,6 +19,7 @@ import { registerAttachments } from "./routes/attachments.js";
 import { registerRecovery } from "./routes/recovery.js";
 import { registerSessions } from "./routes/sessions.js";
 import { registerPayoutAccounts } from "./routes/payout-accounts.js";
+import { registerContactEmail } from "./routes/contact-email.js";
 import { registerSearch } from "./routes/search.js";
 
 /**
@@ -157,6 +158,7 @@ export function createApp() {
   // ── KYC + payouts (M8 — payout-gated on L2) ───────────────────────────────
   registerKyc(app);
   registerPayoutAccounts(app);
+  registerContactEmail(app);
 
   // ── Account recovery + signed-in devices (Phase 3 G) ──────────────────────
   registerRecovery(app);

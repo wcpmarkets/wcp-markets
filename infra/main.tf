@@ -102,6 +102,9 @@ resource "aws_lambda_function" "api" {
       ANTHROPIC_API_KEY_SSM = "/wcp/api/anthropic-api-key"
       SEARCH_AI_MODEL       = "claude-haiku-5-5"
       SEARCH_AI_DAILY_CAP   = "3000"
+      # Receipt-email confirmations (send-only Resend key; sender domain verified in Resend).
+      RESEND_API_KEY_SSM = "/wcp/api/resend-api-key"
+      RESEND_FROM        = "WCP Markets <hello@wcpmarkets.com>"
     }
   }
 
