@@ -66,7 +66,8 @@ export function callbackUrl(): string {
  */
 async function customerEmail(db: Sql, userId: string): Promise<string> {
   const [u] = await db<{ email: string | null }[]>`select nullif(email, '') as email from auth.users where id = ${userId}`;
-  if (u?.email) return u.email;
+  // Reserved TLDs (e.g. the clitest+ps-…@wcp-test.local accounts) fail Paystack's check.
+  if (u?.email && !/\.(local|invalid|test|example|localhost)$/i.test(u.email)) return u.email;
   const domain = process.env.PAYSTACK_CUSTOMER_EMAIL_DOMAIN ?? "customers.wcpmarkets.com";
   return `u${userId.replace(/-/g, "")}@${domain}`;
 }
