@@ -1814,11 +1814,13 @@
           },
           "minPrice": {
             "type": "integer",
-            "description": "kobo"
+            "description": "kobo",
+            "format": "int64"
           },
           "maxPrice": {
             "type": "integer",
-            "description": "kobo"
+            "description": "kobo",
+            "format": "int64"
           },
           "state": {
             "type": "string"

@@ -6119,9 +6119,15 @@ export interface components {
             category?: string;
             /** @enum {string} */
             condition?: "new" | "used" | "refurbished";
-            /** @description kobo */
+            /**
+             * Format: int64
+             * @description kobo
+             */
             minPrice?: number;
-            /** @description kobo */
+            /**
+             * Format: int64
+             * @description kobo
+             */
             maxPrice?: number;
             state?: string;
             city?: string;

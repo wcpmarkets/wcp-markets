@@ -196,7 +196,8 @@ export function openApiDocument(app: App): Record<string, unknown> {
  * 5,000,000,000 kobo, past Int32's ~₦21.5M. JSON numbers are fine to 2^53, but typed
  * clients map a bare `integer` to Int32 (Kotlin `Int`), so every money field is
  * stamped `format: int64` here, in one place, rather than on each schema by hand:
- * any property or query parameter named `*Kobo`, plus the `minPrice`/`maxPrice` filters.
+ * any property or query parameter named `*Kobo`, plus the `minPrice`/`maxPrice` filters
+ * (as query params, and as the AI-search `SearchFilters` properties).
  */
 const MONEY_PARAM = /Kobo$|^(min|max)Price$/;
 function markMoneyInt64(node: unknown, key?: string): void {
@@ -209,7 +210,7 @@ function markMoneyInt64(node: unknown, key?: string): void {
   // A query parameter: { name: "minPrice", in: "query", schema: {...} }
   if (typeof o.name === "string" && o.in && MONEY_PARAM.test(o.name)) stampInt64(o.schema);
   for (const [k, v] of Object.entries(o)) {
-    if (key === "properties" && /Kobo$/.test(k)) stampInt64(v);
+    if (key === "properties" && MONEY_PARAM.test(k)) stampInt64(v);
     markMoneyInt64(v, k);
   }
 }
