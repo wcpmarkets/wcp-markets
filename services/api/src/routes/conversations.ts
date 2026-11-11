@@ -469,4 +469,8 @@ export function registerConversations(app: OpenAPIHono<AuthEnv>) {
 async function markRead(db: Sql, id: string, me: string, conv: { buyer_id: string; seller_id: string }) {
   if (conv.buyer_id === me) await db`update public.conversations set buyer_last_read_at = now() where id = ${id}`;
   else await db`update public.conversations set seller_last_read_at = now() where id = ${id}`;
+  // Its message notifications (20l) are read too — you've seen the messages.
+  await db`
+    update public.notifications set read_at = now()
+    where user_id = ${me} and topic = 'messages' and read_at is null and data->>'conversationId' = ${id}`;
 }

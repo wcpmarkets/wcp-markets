@@ -22,6 +22,7 @@ import { registerPayoutAccounts } from "./routes/payout-accounts.js";
 import { registerContactEmail } from "./routes/contact-email.js";
 import { registerSearch } from "./routes/search.js";
 import { registerPushDevices } from "./routes/push-devices.js";
+import { registerNotifications } from "./routes/notifications.js";
 import { kickOutbox } from "./deals/sqs-relay.js";
 
 /**
@@ -171,6 +172,7 @@ export function createApp() {
   registerPayoutAccounts(app);
   registerContactEmail(app);
   registerPushDevices(app);
+  registerNotifications(app);
 
   // ── Account recovery + signed-in devices (Phase 3 G) ──────────────────────
   registerRecovery(app);

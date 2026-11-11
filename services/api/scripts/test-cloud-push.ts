@@ -109,6 +109,29 @@ async function main() {
     const m2 = (await (await fetch(`${API}/deals/${deal.id}/messages`, { method: "POST", headers: H(buyer.token), body: JSON.stringify({ body: "Hello?" }) })).json()) as { id: number };
     const muted = await note(`msg:${m2.id}`);
     check("messages off → skipped", muted.n?.status === "skipped", `${muted.n?.status}`);
+
+    console.log("E. the in-app list (20l)");
+    type Page = { items: { id: number; topic: string; title: string; conversationId: string | null; dealId: string | null; read: boolean }[]; unread: number; nextBefore: number | null };
+    const list = async (q = "") => (await (await fetch(`${API}/me/notifications${q}`, { headers: H(seller.token) })).json()) as Page;
+    const all = await list();
+    check("newest first: the message, then the offer", all.items.map((i) => i.title).join(" | ") === "Push Test Buyer | New offer: ₦8,000", all.items.map((i) => i.title).join(" | "));
+    check("a switched-off topic isn't listed", all.items.length === 2);
+    check("both unread", all.unread === 2 && all.items.every((i) => !i.read));
+    check("the offer opens its conversation", !!all.items[1]?.conversationId && all.items[1]?.dealId === deal.id);
+    const msgs = await list("?topic=messages");
+    check("filter by topic", msgs.items.length === 1 && msgs.items[0]!.topic === "messages");
+    const paged = await list("?limit=1");
+    const page2 = await list(`?limit=1&before=${paged.nextBefore}`);
+    check("pages", paged.items.length === 1 && page2.items[0]?.title === "New offer: ₦8,000" && page2.nextBefore === null);
+    await fetch(`${API}/conversations/${msgs.items[0]!.conversationId}/read`, { method: "POST", headers: H(seller.token) });
+    const afterRead = await list();
+    check("reading the chat reads its message notification", afterRead.unread === 1 && afterRead.items[0]!.read && !afterRead.items[1]!.read, `unread=${afterRead.unread}`);
+    const one = await fetch(`${API}/me/notifications/read`, { method: "POST", headers: H(seller.token), body: JSON.stringify({}) });
+    const unread = (await (await fetch(`${API}/me/notifications/unread`, { headers: H(seller.token) })).json()) as { unread: number };
+    check("mark all read", one.status === 200 && unread.unread === 0);
+    const other = await fetch(`${API}/me/notifications`, { headers: H(buyer.token) });
+    const otherPage = (await other.json()) as Page;
+    check("only your own", !otherPage.items.some((i) => i.title.startsWith("New offer")));
   } finally {
     await sql.end();
   }

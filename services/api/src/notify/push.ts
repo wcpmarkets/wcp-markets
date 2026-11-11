@@ -221,7 +221,8 @@ async function deliver(db: Sql, n: Note): Promise<void> {
   const [p] = await db<{ prefs: { channels?: { push?: boolean }; topics?: Record<string, boolean> } | null }[]>`
     select notification_prefs as prefs from public.profiles where id = ${n.userId}`;
   // Defaults mirror 0022: push on, orders + messages on.
-  if (p?.prefs?.channels?.push === false || p?.prefs?.topics?.[n.topic] === false) return void (await done("skipped", "prefs"));
+  // A topic switched off: not wanted at all (also hidden from the in-app list, 20l).
+  if (p?.prefs?.topics?.[n.topic] === false) return void (await done("skipped", "topic_off"));
 
   // Blocked senders don't get through, even if the message was sent before the block.
   if (n.topic === "messages") {
@@ -230,6 +231,8 @@ async function deliver(db: Sql, n: Note): Promise<void> {
       where (b.blocker_id = ${n.userId} and b.blocked_id = m.sender_id) limit 1`;
     if (blocked) return void (await done("skipped", "blocked"));
   }
+  // Push switched off: no buzz, but it still shows in the in-app list.
+  if (p?.prefs?.channels?.push === false) return void (await done("skipped", "push_off"));
 
   const devices = await db<{ token: string }[]>`select token from public.push_devices where user_id = ${n.userId}`;
   if (!devices.length) return void (await done("no_device"));
@@ -240,7 +243,9 @@ async function deliver(db: Sql, n: Note): Promise<void> {
   let sent = 0;
   const errors: string[] = [];
   for (const d of devices) {
-    const r = await sender.send({ token: d.token, title: n.title, body: n.body, data: n.data, tag: n.tag, channel: CHANNEL[n.topic] });
+    // notificationId: a tap marks this row read in the app's list.
+    const data = { ...n.data, notificationId: String(claimed.id) };
+    const r = await sender.send({ token: d.token, title: n.title, body: n.body, data, tag: n.tag, channel: CHANNEL[n.topic] });
     if (r.ok) sent++;
     else {
       errors.push(r.error);
