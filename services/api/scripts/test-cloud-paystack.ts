@@ -143,7 +143,7 @@ async function main() {
     await fetch(`${API}/deals/${dealId}/confirm`, { method: "POST", headers: H(buyer.token) });
     const PAYOUT = P - sellerFeeKobo(P);
     let owed = 0;
-    for (let i = 0; i < 14 && owed !== PAYOUT; i++) { await sleep(5_000); owed = await sumAcct(dealId, "seller_payable"); }
+    for (let i = 0; i < 24 && owed !== PAYOUT; i++) { await sleep(5_000); owed = await sumAcct(dealId, "seller_payable"); }
     check("release settles internally → seller owed", owed === PAYOUT, `${owed}`);
     await fetch(`${API}/kyc/verify`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ idType: "bvn", idNumber: "22345678901" }) });
     const np = await fetch(`${API}/deals/${dealId}/payout`, { method: "POST", headers: H(seller.token) });
