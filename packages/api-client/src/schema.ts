@@ -4207,6 +4207,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/disputes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A disputed deal with its case, timeline and chat (staff only) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Dispute detail */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DisputeDetail"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not staff */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/deals/{id}/review": {
         parameters: {
             query?: never;
@@ -7739,6 +7811,56 @@ export interface components {
             createdAt: string | null;
             respondedAt: string | null;
             buyerDisputes30d: number;
+            listingTitle: string | null;
+            /** Format: int64 */
+            principalKobo: number;
+            buyer: components["schemas"]["UserSummary"];
+            seller: components["schemas"]["UserSummary"];
+        };
+        AdminDeal: {
+            /** Format: uuid */
+            id: string;
+            state: string;
+            /** Format: int64 */
+            priceKobo: number;
+            qty: number;
+            createdAt: string;
+        };
+        AdminDealListing: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            lane: string;
+            status: string;
+            imageUrl: string | null;
+        } | null;
+        AdminDealEvent: {
+            seq: number;
+            actor: string;
+            action: string;
+            fromState: string | null;
+            toState: string;
+            /** Format: int64 */
+            priceKobo: number | null;
+            reason: string | null;
+            createdAt: string;
+        };
+        AdminMessage: {
+            id: number;
+            /** Format: uuid */
+            senderId: string;
+            body: string;
+            createdAt: string;
+        };
+        DisputeDetail: {
+            case: components["schemas"]["DisputeCase"] & (Record<string, never> | null);
+            deal: components["schemas"]["AdminDeal"];
+            listing: components["schemas"]["AdminDealListing"];
+            buyer: components["schemas"]["UserSummary"];
+            seller: components["schemas"]["UserSummary"];
+            buyerDisputes30d: number;
+            events: components["schemas"]["AdminDealEvent"][];
+            messages: components["schemas"]["AdminMessage"][];
         };
         Review: {
             /** Format: uuid */

@@ -15,6 +15,8 @@ export function AnalyticsProvider() {
   useEffect(() => {
     const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
     if (!key) return;
+    // The staff console shows private chats and deal details — never record it.
+    if (window.location.pathname.startsWith("/admin")) return;
 
     posthog.init(key, {
       api_host:

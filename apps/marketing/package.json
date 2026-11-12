@@ -13,6 +13,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.48.1",
     "@wcp/analytics": "workspace:*",
+    "@wcp/api-client": "workspace:*",
     "@wcp/tokens": "workspace:*",
     "@wcp/ui": "workspace:*",
     "next": "^15.1.6",

@@ -4,6 +4,8 @@ import { auth, type AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import { transition } from "../deals/commands.js";
 import { isStaffAdmin } from "../deals/admin.js";
+import { userSummaries, UserSummarySchema } from "../profiles/summary.js";
+import { LISTING_IMAGES_BUCKET, createSignedDownloadUrl } from "../supabase.js";
 
 /**
  * M6 — disputes. A buyer opens a dispute (→ DISPUTED, 24h auto-refund clock); the
@@ -59,8 +61,50 @@ const DisputeQueueItemSchema = z
     createdAt: z.string().nullable(),
     respondedAt: z.string().nullable(),
     buyerDisputes30d: z.number().int(),
+    listingTitle: z.string().nullable(),
+    /** Agreed unit price × quantity — what escrow holds for the item (fees aside). */
+    principalKobo: z.number().int(),
+    buyer: UserSummarySchema,
+    seller: UserSummarySchema,
   })
   .openapi("DisputeQueueItem");
+
+const AdminDealEventSchema = z
+  .object({
+    seq: z.number().int(),
+    actor: z.string(),
+    action: z.string(),
+    fromState: z.string().nullable(),
+    toState: z.string(),
+    priceKobo: z.number().int().nullable(),
+    reason: z.string().nullable(),
+    createdAt: z.string(),
+  })
+  .openapi("AdminDealEvent");
+
+const AdminMessageSchema = z
+  .object({ id: z.number().int(), senderId: z.string().uuid(), body: z.string(), createdAt: z.string() })
+  .openapi("AdminMessage");
+
+/** Everything staff need to decide a dispute: the case, the deal, its timeline and chat. */
+const DisputeDetailSchema = z
+  .object({
+    case: DisputeCaseSchema.nullable(),
+    deal: z
+      .object({ id: z.string().uuid(), state: z.string(), priceKobo: z.number().int(), qty: z.number().int(), createdAt: z.string() })
+      .openapi("AdminDeal"),
+    listing: z
+      .object({ id: z.string().uuid(), title: z.string(), lane: z.string(), status: z.string(), imageUrl: z.string().nullable() })
+      .nullable()
+      .openapi("AdminDealListing"),
+    buyer: UserSummarySchema,
+    seller: UserSummarySchema,
+    buyerDisputes30d: z.number().int(),
+    events: z.array(AdminDealEventSchema),
+    /** The buyer–seller thread on this listing, oldest first (last 200). */
+    messages: z.array(AdminMessageSchema),
+  })
+  .openapi("DisputeDetail");
 
 type CaseRow = {
   deal_id: string;
@@ -386,18 +430,23 @@ export function registerDisputes(app: OpenAPIHono<AuthEnv>) {
           created_at: string | Date | null;
           responded_at: string | Date | null;
           buyer_disputes_30d: number;
+          listing_title: string | null;
+          principal: string | number;
         }[]
       >`
         select d.id as deal_id, d.state as deal_state, d.buyer_id, d.seller_id,
+               l.title as listing_title, d.price_kobo * d.qty as principal,
                c.status, c.reason, c.opened_by, c.created_at, c.responded_at,
                (select count(*) from public.deal_events e
                 where e.action = 'dispute' and e.actor_id = d.buyer_id
                   and e.created_at > now() - interval '30 days')::int as buyer_disputes_30d
         from public.deals d
         left join public.dispute_cases c on c.deal_id = d.id
+        left join public.listings l on l.id = d.listing_id
         where d.state in ('DISPUTED', 'DISPUTED_RESPONDED')
         order by coalesce(c.created_at, d.updated_at)
       `;
+      const people = await userSummaries(db, rows.flatMap((r) => [r.buyer_id, r.seller_id]));
       return c.json(
         rows.map((r) => ({
           dealId: r.deal_id,
@@ -410,7 +459,123 @@ export function registerDisputes(app: OpenAPIHono<AuthEnv>) {
           createdAt: isoN(r.created_at),
           respondedAt: isoN(r.responded_at),
           buyerDisputes30d: r.buyer_disputes_30d,
+          listingTitle: r.listing_title,
+          principalKobo: Number(r.principal),
+          buyer: people.get(r.buyer_id)!,
+          seller: people.get(r.seller_id)!,
         })),
+        200,
+      );
+    },
+  );
+
+  // ── GET /admin/disputes/{id} — the full picture for a decision (staff only) ──
+  // Staff read the parties' chat here; the privacy policy covers it ("prevent fraud,
+  // resolve disputes" — deals, messages, reports; legitimate interest).
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/admin/disputes/{id}",
+      summary: "A disputed deal with its case, timeline and chat (staff only)",
+      tags: ["disputes"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      request: { params: z.object({ id: z.string().uuid() }) },
+      responses: {
+        200: { description: "Dispute detail", content: { "application/json": { schema: DisputeDetailSchema } } },
+        401: { description: "Unauthorized" },
+        403: { description: "Not staff", content: { "application/json": { schema: ErrorSchema } } },
+        404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+        503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
+      },
+    }),
+    async (c) => {
+      const user = c.get("user");
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      if (!(await isStaffAdmin(db, user.sub))) return c.json({ error: "forbidden" }, 403);
+      const { id } = c.req.valid("param");
+      const [d] = await db<
+        {
+          id: string;
+          state: string;
+          price_kobo: string | number;
+          qty: number;
+          created_at: string | Date;
+          buyer_id: string;
+          seller_id: string;
+          listing_id: string;
+          title: string | null;
+          lane: string | null;
+          status: string | null;
+          image_path: string | null;
+          buyer_disputes_30d: number;
+        }[]
+      >`
+        select d.id, d.state, d.price_kobo, d.qty, d.created_at, d.buyer_id, d.seller_id, d.listing_id,
+               l.title, l.lane, l.status, l.image_paths[1] as image_path,
+               (select count(*) from public.deal_events e
+                where e.action = 'dispute' and e.actor_id = d.buyer_id
+                  and e.created_at > now() - interval '30 days')::int as buyer_disputes_30d
+        from public.deals d left join public.listings l on l.id = d.listing_id
+        where d.id = ${id}
+      `;
+      if (!d) return c.json({ error: "not_found" }, 404);
+      const [caseRows, events, messages, people] = await Promise.all([
+        db<CaseRow[]>`select ${db.unsafe(SELECT)} from public.dispute_cases where deal_id = ${id}`,
+        db<
+          {
+            seq: number;
+            actor: string;
+            action: string;
+            from_state: string | null;
+            to_state: string;
+            price_kobo: string | number | null;
+            reason: string | null;
+            created_at: string | Date;
+          }[]
+        >`
+          select seq, actor, action, from_state, to_state, price_kobo, reason, created_at
+          from public.deal_events where deal_id = ${id} order by seq
+        `,
+        db<{ id: string | number; sender_id: string; body: string; created_at: string | Date }[]>`
+          select * from (
+            select m.id, m.sender_id, m.body, m.created_at from public.messages m
+            join public.conversations cv on cv.id = m.conversation_id
+            where cv.listing_id = ${d.listing_id} and cv.buyer_id = ${d.buyer_id}
+            order by m.created_at desc limit 200
+          ) t order by created_at
+        `,
+        userSummaries(db, [d.buyer_id, d.seller_id]),
+      ]);
+      return c.json(
+        {
+          case: caseRows[0] ? await toCase(caseRows[0]) : null,
+          deal: { id: d.id, state: d.state, priceKobo: Number(d.price_kobo), qty: d.qty, createdAt: iso(d.created_at) },
+          listing: d.title
+            ? {
+                id: d.listing_id,
+                title: d.title,
+                lane: d.lane ?? "",
+                status: d.status ?? "",
+                imageUrl: d.image_path ? await createSignedDownloadUrl(LISTING_IMAGES_BUCKET, d.image_path) : null,
+              }
+            : null,
+          buyer: people.get(d.buyer_id)!,
+          seller: people.get(d.seller_id)!,
+          buyerDisputes30d: d.buyer_disputes_30d,
+          events: events.map((e) => ({
+            seq: e.seq,
+            actor: e.actor,
+            action: e.action,
+            fromState: e.from_state,
+            toState: e.to_state,
+            priceKobo: e.price_kobo == null ? null : Number(e.price_kobo),
+            reason: e.reason,
+            createdAt: iso(e.created_at),
+          })),
+          messages: messages.map((m) => ({ id: Number(m.id), senderId: m.sender_id, body: m.body, createdAt: iso(m.created_at) })),
+        },
         200,
       );
     },
