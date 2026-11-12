@@ -67,7 +67,7 @@ export default function DeleteAccountPage() {
           <Section title="Can't receive the code?">
             <p className="mt-3">
               If you no longer have the phone number, email{" "}
-              <a href="mailto:wcpmarketsng@gmail.com">wcpmarketsng@gmail.com</a> from the email on
+              <a href="mailto:cx@wcpmarkets.com">cx@wcpmarkets.com</a> from the email on
               your account, or recover the account in the app first.
             </p>
           </Section>

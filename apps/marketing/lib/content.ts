@@ -209,7 +209,7 @@ export const footer = {
       // nothing when the device has no default mail app configured.
       kind: "email",
       label: "Email WCP Markets",
-      href: "https://mail.google.com/mail/?view=cm&fs=1&to=wcpmarketsng@gmail.com",
+      href: "mailto:cx@wcpmarkets.com",
     },
   ],
 } as const;
