@@ -30,4 +30,4 @@ export function createWcpClient(options: WcpClientOptions = {}) {
 }
 
 export type WcpClient = ReturnType<typeof createWcpClient>;
-export type { paths } from "./schema.js";
+export type { paths, components } from "./schema.js";
