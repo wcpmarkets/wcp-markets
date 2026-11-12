@@ -4035,6 +4035,48 @@
           "email"
         ]
       },
+      "DeletionBlocker": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "deal",
+              "payout"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "label"
+        ]
+      },
+      "DeletionCheck": {
+        "type": "object",
+        "properties": {
+          "canDelete": {
+            "type": "boolean"
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeletionBlocker"
+            }
+          }
+        },
+        "required": [
+          "canDelete",
+          "blockers"
+        ]
+      },
       "PushDevice": {
         "type": "object",
         "properties": {
@@ -4890,6 +4932,55 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete my account (anonymised in place; refused while a deal or payout is open)",
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "Something must finish first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionCheck"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Data removed but the sign-in account couldn't be closed — retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "503": {
             "description": "Database unavailable",
@@ -10134,6 +10225,44 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/deletion": {
+      "get": {
+        "summary": "Can this account be deleted now — and if not, what must finish first",
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Check",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionCheck"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
           },
           "503": {
             "description": "Database unavailable",

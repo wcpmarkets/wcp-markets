@@ -86,7 +86,59 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete my account (anonymised in place; refused while a deal or payout is open) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Something must finish first */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeletionCheck"];
+                    };
+                };
+                /** @description Data removed but the sign-in account couldn't be closed — retry */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         /** Update the authenticated user's profile and preferences */
@@ -5218,6 +5270,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/deletion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Can this account be deleted now — and if not, what must finish first */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Check */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeletionCheck"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/push-devices": {
         parameters: {
             query?: never;
@@ -7759,6 +7863,17 @@ export interface components {
         ContactEmailRequest: {
             /** Format: email */
             email: string;
+        };
+        DeletionBlocker: {
+            /** @enum {string} */
+            kind: "deal" | "payout";
+            /** Format: uuid */
+            id: string;
+            label: string;
+        };
+        DeletionCheck: {
+            canDelete: boolean;
+            blockers: components["schemas"]["DeletionBlocker"][];
         };
         PushDevice: {
             registered: boolean;

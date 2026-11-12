@@ -24,6 +24,7 @@ import { registerSearch } from "./routes/search.js";
 import { registerPushDevices } from "./routes/push-devices.js";
 import { registerNotifications } from "./routes/notifications.js";
 import { registerWatch } from "./routes/watch.js";
+import { registerAccount } from "./routes/account.js";
 import { kickOutbox } from "./deals/sqs-relay.js";
 
 /**
@@ -172,6 +173,7 @@ export function createApp() {
   registerKyc(app);
   registerPayoutAccounts(app);
   registerContactEmail(app);
+  registerAccount(app);
   registerPushDevices(app);
   registerNotifications(app);
   registerWatch(app);
