@@ -16,6 +16,9 @@ const btn = "rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50";
 export function DisputeDecision({ dealId, depositClaim }: { dealId: string; depositClaim: boolean }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(resolveDispute, {});
   const [choice, setChoice] = useState<"release" | "refund" | null>(null);
+  // Controlled: React resets a form after its action runs, which would wipe a
+  // carefully written reason whenever the API refuses the decision.
+  const [note, setNote] = useState("");
   if (state.ok) return <Result s={state} />;
   return (
     <form action={action} className="flex flex-col gap-3">
@@ -25,6 +28,8 @@ export function DisputeDecision({ dealId, depositClaim }: { dealId: string; depo
         Reason for the decision (both parties may be told this)
         <textarea
           name="note"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
           rows={3}
           required
           minLength={10}
@@ -60,12 +65,15 @@ export function DisputeDecision({ dealId, depositClaim }: { dealId: string; depo
 
 export function ReportDecision({ reportId, canRemoveListing }: { reportId: string; canRemoveListing: boolean }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(resolveReport, {});
+  const [note, setNote] = useState("");
   if (state.ok) return <Result s={state} />;
   return (
     <form action={action} className="flex flex-col gap-2">
       <input type="hidden" name="reportId" value={reportId} />
       <input
         name="note"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
         maxLength={500}
         placeholder="Note (optional)"
         className="rounded-lg border border-line bg-canvas px-3 py-1.5 text-sm outline-none focus:border-brand-cyan"

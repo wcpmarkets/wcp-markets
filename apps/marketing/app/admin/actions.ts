@@ -121,7 +121,7 @@ export async function resolveReport(_: ActionState, form: FormData): Promise<Act
     body: { action, ...(note ? { note: note.slice(0, 500) } : {}) },
   });
   if (!r.ok) return { error: explain(r.error) };
-  revalidatePath("/admin", "layout");
+  // No revalidate: the card stays and shows the outcome; counts refresh on the next page load.
   const n = r.data.resolved;
   return { ok: true, message: `Closed ${n} report${n === 1 ? "" : "s"}${r.data.listingStatus ? ` · listing is now ${r.data.listingStatus.replace("_", " ")}` : ""}.` };
 }
@@ -132,6 +132,6 @@ export async function decideRecovery(_: ActionState, form: FormData): Promise<Ac
   if (!UUID.test(id) || (decision !== "approve" && decision !== "reject")) return { error: "Bad request." };
   const r = await adminApi(`/admin/recoveries/${id}/${decision}`, { method: "POST" });
   if (!r.ok) return { error: explain(r.error) };
-  revalidatePath("/admin", "layout");
+  // No revalidate: the card stays and shows the outcome; counts refresh on the next page load.
   return { ok: true, message: decision === "approve" ? "Approved — the 24-hour hold has started and both numbers get an SMS." : "Rejected." };
 }
