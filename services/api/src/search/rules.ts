@@ -129,7 +129,16 @@ export function readByRules(q: string, laneHint?: Lane | null): RawReading {
   // A bare "₦250k" with no bound word reads as a ceiling.
   m = /₦\s*(\d[\d,]*(?:\.\d+)?)\s*(k|m|million)?\b/i.exec(text);
   if (m && f.maxPriceNaira == null) { const v = amount(m[1]!, m[2]); if (v != null) { f.maxPriceNaira = v; cut(new RegExp(esc(m[0]), "i")); } }
-  cut(/\/\s*(yr|year|annum|month|mo|night)\b|\bper (year|annum|month|night)\b/gi);
+  // A price period says what kind of deal it is ("4m a year" = rent, "50k a night" =
+  // shortlet). Read it before cutting it, so it never lingers as a keyword ("year").
+  const perNight = /\/\s*night\b|\b(a|per|each)\s+night\b|\bnightly\b/i.test(text);
+  const perTerm = /\/\s*(yr|year|annum|month|mo)\b|\b(a|per|every|each)\s+(year|yr|annum|month)\b|\b(yearly|annually|monthly|per annum)\b/i.test(text);
+  // "600k yearly", "50k a night": with a period beside it, a bare amount is the price.
+  if (f.maxPriceNaira == null && (perNight || perTerm)) {
+    m = /\b(\d[\d,]*(?:\.\d+)?)\s*(k|m|million)\b/i.exec(text);
+    if (m) { const v = amount(m[1]!, m[2]); if (v != null) { f.maxPriceNaira = v; cut(new RegExp(esc(m[0]), "i")); } }
+  }
+  cut(/\/\s*(yr|year|annum|month|mo|night)\b|\b(a|per|every|each)\s+(year|yr|annum|month|night)\b|\b(yearly|annually|monthly|nightly|per annum)\b/gi);
 
   // Places: areas first (more specific), then states.
   for (const r of NG_REGIONS) {
@@ -147,8 +156,8 @@ export function readByRules(q: string, laneHint?: Lane | null): RawReading {
   // Property.
   m = /\b(\d{1,2})\s*-?\s*(bed(room)?s?|br|bd)\b/i.exec(text);
   if (m) { f.minBeds = Number(m[1]); vote("property"); cut(new RegExp(esc(m[0]), "i")); }
-  if (/\bshort[- ]?lets?\b|\bper night\b|\bairbnb\b/i.test(text)) { f.dealType = "shortlet"; vote("property"); cut(/\bshort[- ]?lets?\b|\bairbnb\b/gi); }
-  else if (/\b(to let|for rent|rent(al)?|lease)\b/i.test(text) && !/\b(car|equipment)\b/i.test(text)) {
+  if (/\bshort[- ]?lets?\b|\bairbnb\b/i.test(text) || perNight) { f.dealType = "shortlet"; vote("property"); cut(/\bshort[- ]?lets?\b|\bairbnb\b/gi); }
+  else if ((/\b(to let|for rent|rent(al)?|lease)\b/i.test(text) || perTerm) && !/\b(car|equipment)\b/i.test(text)) {
     const hasPropertyNoun = PROPERTY_TYPE_WORDS.some(([re]) => re.test(text)) || f.minBeds != null;
     if (hasPropertyNoun || lane === "property") { f.dealType = "rent"; vote("property"); cut(/\b(to let|for rent|rental|rent|lease)\b/gi); }
   } else if (/\bfor sale\b/i.test(text) && PROPERTY_TYPE_WORDS.some(([re]) => re.test(text))) f.dealType = "sale";
