@@ -4369,7 +4369,8 @@
             "type": "string",
             "enum": [
               "deal",
-              "payout"
+              "payout",
+              "balance"
             ]
           },
           "id": {
@@ -5273,7 +5274,7 @@
         }
       },
       "delete": {
-        "summary": "Delete my account (anonymised in place; refused while a deal or payout is open)",
+        "summary": "Delete my account (anonymised in place; refused while a deal or payout is open, or money is waiting to be withdrawn)",
         "tags": [
           "users"
         ],

@@ -86,7 +86,7 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        /** Delete my account (anonymised in place; refused while a deal or payout is open) */
+        /** Delete my account (anonymised in place; refused while a deal or payout is open, or money is waiting to be withdrawn) */
         delete: {
             parameters: {
                 query?: never;
@@ -8074,7 +8074,7 @@ export interface components {
         };
         DeletionBlocker: {
             /** @enum {string} */
-            kind: "deal" | "payout";
+            kind: "deal" | "payout" | "balance";
             /** Format: uuid */
             id: string;
             label: string;

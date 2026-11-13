@@ -47,13 +47,14 @@ export function DeleteAccountForm() {
         <div className="rounded-[14px] border border-line bg-panel px-6 py-5 text-[14.5px]">
           <b className="text-ink">These need to finish first</b>
           <p className="mt-1 text-muted">
-            Money is still moving on your account, so it can&apos;t be deleted yet. Complete or
-            cancel these in the WCP Markets app, then come back:
+            Money is still moving on your account, or waiting to be paid to you, so it can&apos;t
+            be deleted yet. Finish these in the WCP Markets app (withdraw money from Account →
+            Payouts), then come back:
           </p>
           <ul className="mt-3 list-disc space-y-1 pl-5 text-ink-secondary">
             {step.blockers.map((b) => (
               <li key={b.id}>
-                {b.kind === "deal" ? "Open deal: " : "Pending payout: "}
+                {b.kind === "deal" ? "Open deal: " : b.kind === "balance" ? "Not yet withdrawn: " : "Payout on its way: "}
                 {b.label}
               </li>
             ))}
