@@ -4097,6 +4097,122 @@
           "settledAt"
         ]
       },
+      "PayoutReady": {
+        "type": "object",
+        "properties": {
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "amountKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "releasedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "dealId",
+          "title",
+          "amountKobo",
+          "releasedAt"
+        ]
+      },
+      "PayoutHistoryItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "amountKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "settled",
+              "failed"
+            ]
+          },
+          "part": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "settledAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "dealId",
+          "title",
+          "amountKobo",
+          "status",
+          "part",
+          "createdAt",
+          "settledAt"
+        ]
+      },
+      "Earnings": {
+        "type": "object",
+        "properties": {
+          "availableKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "processingKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "inEscrowKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "paidOutKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ready": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PayoutReady"
+            }
+          },
+          "payouts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PayoutHistoryItem"
+            }
+          }
+        },
+        "required": [
+          "availableKobo",
+          "processingKobo",
+          "inEscrowKobo",
+          "paidOutKobo",
+          "ready",
+          "payouts"
+        ]
+      },
       "Bank": {
         "type": "object",
         "properties": {
@@ -10180,6 +10296,44 @@
           },
           "404": {
             "description": "No payout"
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/payouts": {
+      "get": {
+        "summary": "The seller's earnings: balances, deals ready to withdraw, payout history",
+        "tags": [
+          "payouts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Earnings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Earnings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
           },
           "503": {
             "description": "Database unavailable",

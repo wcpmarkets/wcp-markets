@@ -4987,6 +4987,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The seller's earnings: balances, deals ready to withdraw, payout history */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Earnings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Earnings"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/banks": {
         parameters: {
             query?: never;
@@ -7948,6 +8000,40 @@ export interface components {
             status: "pending" | "settled" | "failed";
             createdAt: string;
             settledAt: string | null;
+        };
+        PayoutReady: {
+            /** Format: uuid */
+            dealId: string;
+            title: string;
+            /** Format: int64 */
+            amountKobo: number;
+            releasedAt: string;
+        };
+        PayoutHistoryItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            dealId: string;
+            title: string;
+            /** Format: int64 */
+            amountKobo: number;
+            /** @enum {string} */
+            status: "pending" | "settled" | "failed";
+            part: number;
+            createdAt: string;
+            settledAt: string | null;
+        };
+        Earnings: {
+            /** Format: int64 */
+            availableKobo: number;
+            /** Format: int64 */
+            processingKobo: number;
+            /** Format: int64 */
+            inEscrowKobo: number;
+            /** Format: int64 */
+            paidOutKobo: number;
+            ready: components["schemas"]["PayoutReady"][];
+            payouts: components["schemas"]["PayoutHistoryItem"][];
         };
         Bank: {
             code: string;

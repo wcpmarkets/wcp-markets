@@ -54,7 +54,7 @@ export default async function DisputePage({ params }: { params: Promise<{ id: st
           <h1 className="text-xl font-bold">{listing?.title ?? "(listing gone)"}</h1>
           <p className="text-sm text-muted">
             {naira(deal.priceKobo)}
-            {deal.qty > 1 && ` × ${deal.qty} = ${naira(deal.priceKobo * deal.qty)}`} · deal opened {when(deal.createdAt)} ·{" "}
+            {deal.qty > 1 && ` for ${deal.qty}`} · deal opened {when(deal.createdAt)} ·{" "}
             <span className="font-mono text-xs">{deal.id.slice(0, 8)}</span>
           </p>
         </div>
