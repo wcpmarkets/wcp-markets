@@ -2825,6 +2825,105 @@
           "contentType"
         ]
       },
+      "StatWindow": {
+        "type": "object",
+        "properties": {
+          "last7": {
+            "type": "integer"
+          },
+          "prev7": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "last7",
+          "prev7"
+        ]
+      },
+      "ListingInterest": {
+        "type": "object",
+        "properties": {
+          "buyer": {
+            "$ref": "#/components/schemas/UserSummary"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "message",
+              "offer",
+              "save"
+            ]
+          },
+          "at": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "conversationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "dealId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "buyer",
+          "kind",
+          "at",
+          "snippet",
+          "conversationId",
+          "dealId"
+        ]
+      },
+      "ListingStats": {
+        "type": "object",
+        "properties": {
+          "views": {
+            "$ref": "#/components/schemas/StatWindow"
+          },
+          "chats": {
+            "$ref": "#/components/schemas/StatWindow"
+          },
+          "saves": {
+            "$ref": "#/components/schemas/StatWindow"
+          },
+          "savesTotal": {
+            "type": "integer"
+          },
+          "viewsDaily": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ListingInterest"
+            }
+          }
+        },
+        "required": [
+          "views",
+          "chats",
+          "saves",
+          "savesTotal",
+          "viewsDaily",
+          "recent"
+        ]
+      },
       "BookingTerms": {
         "type": "object",
         "properties": {
@@ -8542,6 +8641,65 @@
           },
           "503": {
             "description": "Storage/DB unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/listings/{id}/stats": {
+      "get": {
+        "summary": "Performance of one of your own listings",
+        "tags": [
+          "listings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found or not yours",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
             "content": {
               "application/json": {
                 "schema": {

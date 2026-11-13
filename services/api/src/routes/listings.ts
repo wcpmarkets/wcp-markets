@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { auth, type AuthEnv } from "../middleware/auth.js";
+import { auth, verifyAccessToken, type AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
 import { NG_REGIONS, areaCentre, isState } from "../data/ng-regions.js";
 import {
@@ -804,6 +804,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         where id = ${id} and status = 'active'
       `;
       if (!rows[0]) return c.json({ error: "not_found" }, 404);
+      await countView(db, rows[0].id, rows[0].seller_id, c.req.header("authorization"));
       return c.json((await toListings(db, [rows[0]]))[0]!, 200);
     },
   );
@@ -965,4 +966,23 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       return c.json({ path, uploadUrl: signed.uploadUrl }, 200);
     },
   );
+}
+
+/**
+ * Seller stats (13c-detail): bump today's view count — unless it's the seller looking at
+ * their own ad. A count only, never who viewed. Best-effort: a failed bump never fails
+ * the read.
+ */
+async function countView(db: Sql, listingId: string, sellerId: string, authz: string | undefined): Promise<void> {
+  try {
+    const token = authz?.match(/^Bearer\s+(.+)$/i)?.[1];
+    if (token && (await verifyAccessToken(token))?.sub === sellerId) return;
+    await db`
+      insert into public.listing_views_daily (listing_id, day, views)
+      values (${listingId}, (now() at time zone 'Africa/Lagos')::date, 1)
+      on conflict (listing_id, day) do update set views = public.listing_views_daily.views + 1
+    `;
+  } catch (e) {
+    console.warn("listing view count failed", (e as Error).message);
+  }
 }

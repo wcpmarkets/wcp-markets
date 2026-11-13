@@ -3150,6 +3150,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/listings/{id}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Performance of one of your own listings */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Stats */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListingStats"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found or not yours */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/listings/{id}/offers": {
         parameters: {
             query?: never;
@@ -7691,6 +7754,29 @@ export interface components {
         ImageUploadRequest: {
             /** @enum {string} */
             contentType: "image/jpeg" | "image/png" | "image/webp";
+        };
+        StatWindow: {
+            last7: number;
+            prev7: number;
+        };
+        ListingInterest: {
+            buyer: components["schemas"]["UserSummary"];
+            /** @enum {string} */
+            kind: "message" | "offer" | "save";
+            at: string;
+            snippet: string | null;
+            /** Format: uuid */
+            conversationId: string | null;
+            /** Format: uuid */
+            dealId: string | null;
+        };
+        ListingStats: {
+            views: components["schemas"]["StatWindow"];
+            chats: components["schemas"]["StatWindow"];
+            saves: components["schemas"]["StatWindow"];
+            savesTotal: number;
+            viewsDaily: number[];
+            recent: components["schemas"]["ListingInterest"][];
         };
         BookingTerms: {
             checkIn: string;
