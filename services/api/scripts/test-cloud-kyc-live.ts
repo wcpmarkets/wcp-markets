@@ -54,6 +54,10 @@ async function main() {
     let s = "PAYMENT_PENDING";
     for (let i = 0; i < 14 && s !== "PAID_IN_ESCROW"; i++) { await sleep(10_000); s = await st(deal.id, buyer.token); }
     check("reached PAID_IN_ESCROW", s === "PAID_IN_ESCROW", s);
+    type Earn = { availableKobo: number; inEscrowKobo: number; paidOutKobo: number; ready: { dealId: string; amountKobo: number }[]; payouts: { dealId: string; status: string; amountKobo: number }[] };
+    const earnings = async () => (await (await fetch(`${API}/me/payouts`, { headers: H(seller.token) })).json()) as Earn;
+    const e0 = await earnings();
+    check("GET /me/payouts: escrow holds the deal", e0.inEscrowKobo === P && e0.availableKobo === 0 && e0.ready.length === 0, JSON.stringify(e0));
     await fetch(`${API}/deals/${deal.id}/handoff`, { method: "POST", headers: H(seller.token) });
     await fetch(`${API}/deals/${deal.id}/confirm`, { method: "POST", headers: H(buyer.token) });
     check("deal COMPLETED", (await st(deal.id, buyer.token)) === "COMPLETED");
@@ -61,6 +65,8 @@ async function main() {
     let owed = 0;
     for (let i = 0; i < 14 && owed === 0; i++) { await sleep(10_000); owed = Number((await sql<{ s: number }[]>`select coalesce(sum(amount_kobo),0)::bigint as s from public.ledger_entries where deal_id = ${deal.id} and account = 'seller_payable'`)[0]!.s); }
     check("release settled → seller_payable = payout", owed === PAYOUT, `${owed}`);
+    const e1 = await earnings();
+    check("GET /me/payouts: released money is ready to withdraw", e1.inEscrowKobo === 0 && e1.availableKobo === PAYOUT && e1.ready[0]?.dealId === deal.id, JSON.stringify(e1));
 
     // ── THE GATE: unverified seller cannot be paid out ─────────────────────────
     const kyc0 = await fetch(`${API}/kyc`, { headers: H(seller.token) });
@@ -93,6 +99,8 @@ async function main() {
     for (let i = 0; i < 14 && payable !== 0; i++) { await sleep(10_000); payable = Number((await sql<{ s: number }[]>`select coalesce(sum(amount_kobo),0)::bigint as s from public.ledger_entries where deal_id = ${deal.id} and account = 'seller_payable'`)[0]!.s); }
     check("payout settled → seller_payable nets to 0", payable === 0, `${payable}`);
     check("payout row settled", ((await (await fetch(`${API}/deals/${deal.id}/payout`, { headers: H(seller.token) })).json()) as { status: string }).status === "settled");
+    const e2 = await earnings();
+    check("GET /me/payouts: paid out, nothing left to withdraw", e2.paidOutKobo === PAYOUT && e2.availableKobo === 0 && e2.payouts[0]?.status === "settled", JSON.stringify(e2));
 
     // ── The DB stores no BVN/NIN ───────────────────────────────────────────────
     const rowText = JSON.stringify((await sql`select * from public.kyc_verifications where user_id = ${seller.id}`)[0] ?? {});

@@ -65,9 +65,144 @@ async function resolveOn(rail: "mock" | "paystack", accountNumber: string, bankC
   }
 }
 
+// ── Earnings & payout history (Account → Payouts) ──────────────────────────────
+const PayoutHistoryItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    dealId: z.string().uuid(),
+    title: z.string(),
+    amountKobo: z.number().int(),
+    status: z.enum(["pending", "settled", "failed"]),
+    /** 0 for a whole deal; 0, 1, … for a staged job withdrawn in parts. */
+    part: z.number().int(),
+    createdAt: z.string(),
+    settledAt: z.string().nullable(),
+  })
+  .openapi("PayoutHistoryItem");
+const PayoutReadySchema = z
+  .object({ dealId: z.string().uuid(), title: z.string(), amountKobo: z.number().int(), releasedAt: z.string() })
+  .openapi("PayoutReady");
+const EarningsSchema = z
+  .object({
+    /** Released to the seller, not yet withdrawn or on its way. */
+    availableKobo: z.number().int(),
+    /** Payouts on their way to the bank. */
+    processingKobo: z.number().int(),
+    /** Held in escrow for open deals, before the seller fee. */
+    inEscrowKobo: z.number().int(),
+    /** Ever paid out to the bank. */
+    paidOutKobo: z.number().int(),
+    ready: z.array(PayoutReadySchema),
+    payouts: z.array(PayoutHistoryItemSchema),
+  })
+  .openapi("Earnings");
+
+const iso = (d: Date | string) => (d instanceof Date ? d : new Date(d)).toISOString();
+
 const resolveLimit = rateLimit({ prefix: "acct-resolve", limit: 20, windowSecs: 3600, keys: (c) => [(c.get("user") as { sub: string }).sub] });
 
 export function registerPayoutAccounts(app: OpenAPIHono<AuthEnv>) {
+  // What the seller has earned and where it is. All of it is derived: released money
+  // is the deal's seller_payable balance in the ledger (a settled payout books it back
+  // out), a pending payout isn't in the ledger yet so it's subtracted here, and escrow
+  // is what the ledger still holds for the seller's open deals.
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/me/payouts",
+      summary: "The seller's earnings: balances, deals ready to withdraw, payout history",
+      tags: ["payouts"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      responses: {
+        200: { description: "Earnings", content: { "application/json": { schema: EarningsSchema } } },
+        401: { description: "Unauthorized" },
+        503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
+      },
+    }),
+    async (c) => {
+      const uid = c.get("user").sub;
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const [deals, payouts] = await Promise.all([
+        db<{ deal_id: string; title: string | null; payable: string; held: string; pending: string; released_at: Date | null }[]>`
+          with mine as (select id, listing_id from public.deals where seller_id = ${uid}),
+          led as (
+            select le.deal_id,
+                   sum(le.amount_kobo) filter (where le.account = 'seller_payable') as payable,
+                   sum(le.amount_kobo) filter (where le.account = 'escrow_holding') as held,
+                   max(le.created_at) filter (where le.account = 'seller_payable' and le.movement = 'release') as released_at
+            from public.ledger_entries le join mine m on m.id = le.deal_id
+            group by le.deal_id
+          )
+          select led.deal_id, l.title,
+                 coalesce(led.payable, 0)::bigint as payable,
+                 -- A shortlet's caution deposit (stage 2) is the guest's money, not the host's.
+                 (coalesce(led.held, 0) - coalesce((
+                    select sum(ms.amount_kobo) from public.deal_milestones ms
+                    join public.bookings b on b.deal_id = ms.deal_id
+                    where ms.deal_id = led.deal_id and ms.idx = 2 and ms.status in ('held', 'refunding')), 0))::bigint as held,
+                 coalesce((select sum(p.amount_kobo) from public.payouts p
+                           where p.deal_id = led.deal_id and p.status = 'pending'), 0)::bigint as pending,
+                 led.released_at
+          from led join mine m on m.id = led.deal_id
+          left join public.listings l on l.id = m.listing_id
+          where coalesce(led.payable, 0) <> 0 or coalesce(led.held, 0) <> 0
+        `,
+        db<{ id: string; deal_id: string; title: string | null; amount_kobo: string; status: "pending" | "settled" | "failed"; part: number; created_at: Date; settled_at: Date | null }[]>`
+          select p.id, p.deal_id, l.title, p.amount_kobo, p.status, p.part, p.created_at, p.settled_at
+          from public.payouts p
+          join public.deals d on d.id = p.deal_id
+          left join public.listings l on l.id = d.listing_id
+          where p.seller_id = ${uid}
+          order by p.created_at desc
+          limit 100
+        `,
+      ]);
+
+      const title = (t: string | null) => t ?? "Listing removed";
+      let availableKobo = 0;
+      let processingKobo = 0;
+      let inEscrowKobo = 0;
+      const ready: z.infer<typeof PayoutReadySchema>[] = [];
+      for (const d of deals) {
+        const payable = Number(d.payable);
+        const pending = Number(d.pending);
+        processingKobo += pending;
+        inEscrowKobo += Math.max(0, Number(d.held));
+        const free = payable - pending;
+        // A pending payout is withdrawn already; only a deal with none in flight can be
+        // withdrawn again (one payout in flight per deal — routes/kyc.ts).
+        if (free > 0 && pending === 0) {
+          availableKobo += free;
+          ready.push({ dealId: d.deal_id, title: title(d.title), amountKobo: free, releasedAt: iso(d.released_at ?? new Date()) });
+        }
+      }
+      ready.sort((a, b) => b.releasedAt.localeCompare(a.releasedAt));
+      const paidOutKobo = payouts.filter((p) => p.status === "settled").reduce((a, p) => a + Number(p.amount_kobo), 0);
+      return c.json(
+        {
+          availableKobo,
+          processingKobo,
+          inEscrowKobo,
+          paidOutKobo,
+          ready,
+          payouts: payouts.map((p) => ({
+            id: p.id,
+            dealId: p.deal_id,
+            title: title(p.title),
+            amountKobo: Number(p.amount_kobo),
+            status: p.status,
+            part: p.part,
+            createdAt: iso(p.created_at),
+            settledAt: p.settled_at ? iso(p.settled_at) : null,
+          })),
+        },
+        200,
+      );
+    },
+  );
+
   app.openapi(
     createRoute({
       method: "get",
