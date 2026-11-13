@@ -2820,6 +2820,7 @@ export interface paths {
                     propertyType?: "apartment" | "house" | "land" | "commercial" | "shop" | "office";
                     dealType?: "rent" | "sale" | "shortlet";
                     minBeds?: number | null;
+                    verified?: "true";
                     sort?: "relevance" | "price_asc" | "price_desc" | "newest" | "mileage_asc";
                     limit?: number;
                     offset?: number | null;

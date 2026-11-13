@@ -12,7 +12,7 @@
 import { NG_REGIONS } from "../data/ng-regions.js";
 import { SERVICE_CATALOG } from "../data/services.js";
 import { VEHICLE_CATALOG } from "../data/vehicles.js";
-import type { Lane } from "./shape.js";
+import { PLACE_ALIASES, type Lane } from "./shape.js";
 
 export type RawReading = {
   lane: Lane | null;
@@ -140,7 +140,14 @@ export function readByRules(q: string, laneHint?: Lane | null): RawReading {
   }
   cut(/\/\s*(yr|year|annum|month|mo|night)\b|\b(a|per|every|each)\s+(year|yr|annum|month|night)\b|\b(yearly|annually|monthly|nightly|per annum)\b/gi);
 
-  // Places: areas first (more specific), then states.
+  // Places: aliases ("VI" → Victoria Island), then areas (more specific), then states.
+  for (const a of PLACE_ALIASES) {
+    const hit = a.re.exec(text);
+    if (!f.city && hit) {
+      const r = NG_REGIONS.find((r) => r.areas.some((x) => x.city === a.city));
+      if (r) { f.city = a.city; f.state = r.state; cut(new RegExp(esc(hit[0]), "g")); }
+    }
+  }
   for (const r of NG_REGIONS) {
     for (const a of r.areas) {
       if (!f.city && word(a.city).test(text)) { f.city = a.city; f.state = r.state; cut(word(a.city)); }

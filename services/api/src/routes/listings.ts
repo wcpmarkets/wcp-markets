@@ -418,6 +418,8 @@ export type SearchParams = {
   propertyType?: (typeof PROPERTY_TYPES)[number];
   dealType?: (typeof DEAL_TYPES)[number];
   minBeds?: number;
+  /** Only sellers who passed ID verification (level 2+). */
+  verified?: "true";
 };
 
 /** The WHERE for a search: active listings narrowed by every filter that's set. */
@@ -448,6 +450,7 @@ export function searchWhere(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, 
   if (p.propertyType) where = db`${where} and attributes->>'propertyType' = ${p.propertyType}`;
   if (p.dealType) where = db`${where} and attributes->>'dealType' = ${p.dealType}`;
   if (p.minBeds != null) where = db`${where} and (attributes->>'beds')::int >= ${p.minBeds}`;
+  if (p.verified === "true") where = db`${where} and seller_id in (select id from public.profiles where verification_level >= 2)`;
   if (p.q)
     // FTS match OR a fuzzy word-similarity match on the title (typo tolerance;
     // word_similarity finds the best-matching word within the title, so a long
@@ -633,6 +636,8 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           propertyType: z.enum(PROPERTY_TYPES).optional(),
           dealType: z.enum(DEAL_TYPES).optional(),
           minBeds: z.coerce.number().int().min(0).max(50).optional(),
+          /** "true" = only ID-verified sellers (13e-filters-services "Verified providers only"). */
+          verified: z.enum(["true"]).optional(),
           /** relevance (default; newest when there's no query), price, newest, or lowest mileage. */
           sort: z.enum(["relevance", "price_asc", "price_desc", "newest", "mileage_asc"]).optional(),
           limit: z.coerce.number().int().min(1).max(50).optional(),

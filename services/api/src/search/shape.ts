@@ -148,15 +148,27 @@ export function canonMake(v: unknown): string | undefined {
 }
 
 /**
+ * What people actually type for a place, mapped to the region tree's name. Uppercase
+ * abbreviations match case-sensitively ("VI", not the "vi" inside a word or model name).
+ */
+export const PLACE_ALIASES: { re: RegExp; city: string }[] = [
+  { re: /(?<![\p{L}\p{N}])(VI|V\.I\.?|V\/I)(?![\p{L}\p{N}])/u, city: "Victoria Island" },
+  { re: /(?<![\p{L}\p{N}])PH(?![\p{L}\p{N}])/u, city: "Port Harcourt" },
+  { re: /(?<![\p{L}\p{N}])port[- ]?harcourt(?![\p{L}\p{N}])/iu, city: "Port Harcourt" },
+  { re: /(?<![\p{L}\p{N}])lekki\s+(phase|ph\.?)\s*(1|one|i)(?![\p{L}\p{N}])/iu, city: "Lekki" },
+];
+
+/**
  * Place a state and/or area against the region tree. An area on its own resolves when
  * exactly one state has it; a state on its own is fine; anything unknown is dropped.
  */
 export function canonPlace(state: unknown, city: unknown): { state?: string; city?: string } {
   const s = typeof state === "string" ? NG_REGIONS.find((r) => lc(r.state) === lc(state)) : undefined;
   if (typeof city === "string" && city.trim()) {
+    const name = PLACE_ALIASES.find((a) => a.re.test(` ${city} `))?.city ?? city;
     const regions = s ? [s] : NG_REGIONS;
     const hits = regions.flatMap((r) =>
-      r.areas.filter((a) => lc(a.city) === lc(city)).map((a) => ({ state: r.state, city: a.city })),
+      r.areas.filter((a) => lc(a.city) === lc(name)).map((a) => ({ state: r.state, city: a.city })),
     );
     if (hits.length === 1) return hits[0]!;
   }

@@ -8329,6 +8329,17 @@
             "schema": {
               "type": "string",
               "enum": [
+                "true"
+              ]
+            },
+            "required": false,
+            "name": "verified",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
                 "relevance",
                 "price_asc",
                 "price_desc",
