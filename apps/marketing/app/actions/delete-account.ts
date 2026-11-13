@@ -18,7 +18,7 @@ const SUPABASE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_ANON_KEY;
 const API_URL = (process.env.WCP_API_URL ?? "https://a33kb0enoa.execute-api.eu-west-1.amazonaws.com").replace(/\/$/, "");
 
-export type Blocker = { kind: "deal" | "payout"; id: string; label: string };
+export type Blocker = { kind: "deal" | "payout" | "balance"; id: string; label: string };
 
 /** Nigerian numbers in any usual form → E.164 (+234…). null if it isn't one. */
 function toE164(input: string): string | null {

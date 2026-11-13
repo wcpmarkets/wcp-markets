@@ -9,8 +9,10 @@ import { deleteStorageObject, getServiceKey, LISTING_IMAGES_BUCKET } from "../su
  * Account deletion — in the app (Privacy & security) and on the web
  * (wcpmarkets.com/delete-account), as Play requires for any app you can sign up in.
  *
- * Refused while money is in motion: an open deal (anything not terminal — so a live
- * escrow, a dispute or an upcoming stay) or a payout not yet settled. Otherwise, at once:
+ * Refused while money is in motion or owed: an open deal (anything not terminal — so a
+ * live escrow, a dispute or an upcoming stay), a payout not yet settled, or money released
+ * to the seller that they haven't withdrawn yet (deleting would strand it: the payout bank
+ * account goes, and nobody could sign in to ask for it). Otherwise, at once:
  *
  *  - gone: addresses, saved items, watches, push devices, notifications, receipt email,
  *    payout bank account, blocks, recovery requests, staff roles, verification attempts;
@@ -29,9 +31,11 @@ const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 
 const DeletionBlockerSchema = z
   .object({
-    kind: z.enum(["deal", "payout"]),
+    /** deal = open deal; payout = on its way to the bank; balance = released, not withdrawn. */
+    kind: z.enum(["deal", "payout", "balance"]),
+    /** The deal's id for deal and balance, the payout's id for payout. */
     id: z.string().uuid(),
-    /** What to show: the listing title for a deal, the amount for a payout. */
+    /** What to show: the listing title for a deal, the amount (and listing) otherwise. */
     label: z.string(),
   })
   .openapi("DeletionBlocker");
@@ -54,9 +58,23 @@ async function blockers(db: Sql, uid: string): Promise<Blocker[]> {
   const payouts = await db<{ id: string; amount: string }[]>`
     select id, amount_kobo::text as amount from public.payouts
     where seller_id = ${uid} and status = 'pending' limit 20`;
+  // Released to the seller (seller_payable > 0 — a settled payout books it back out),
+  // with no payout already on its way for that deal (those are listed above).
+  const owed = await db<{ id: string; title: string | null; amount: string }[]>`
+    select d.id, l.title, sum(le.amount_kobo)::text as amount
+    from public.deals d
+    join public.ledger_entries le on le.deal_id = d.id and le.account = 'seller_payable'
+    left join public.listings l on l.id = d.listing_id
+    where d.seller_id = ${uid}
+      and not exists (select 1 from public.payouts p where p.deal_id = d.id and p.status = 'pending')
+    group by d.id, l.title
+    having sum(le.amount_kobo) > 0
+    limit 20`;
+  const naira = (kobo: string) => `₦${(Number(kobo) / 100).toLocaleString("en-NG")}`;
   return [
     ...deals.map((d) => ({ kind: "deal" as const, id: d.id, label: d.title ?? "A deal" })),
-    ...payouts.map((p) => ({ kind: "payout" as const, id: p.id, label: `₦${(Number(p.amount) / 100).toLocaleString("en-NG")} payout` })),
+    ...payouts.map((p) => ({ kind: "payout" as const, id: p.id, label: `${naira(p.amount)} payout` })),
+    ...owed.map((o) => ({ kind: "balance" as const, id: o.id, label: `${naira(o.amount)} from ${o.title ?? "a sale"}` })),
   ];
 }
 
@@ -102,7 +120,7 @@ export function registerAccount(app: OpenAPIHono<AuthEnv>) {
     createRoute({
       method: "delete",
       path: "/me",
-      summary: "Delete my account (anonymised in place; refused while a deal or payout is open)",
+      summary: "Delete my account (anonymised in place; refused while a deal or payout is open, or money is waiting to be withdrawn)",
       tags: ["users"],
       security: [{ bearerAuth: [] }],
       middleware: [auth] as const,
