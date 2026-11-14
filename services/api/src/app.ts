@@ -12,6 +12,7 @@ import { registerProfiles } from "./routes/profiles.js";
 import { registerConversations } from "./routes/conversations.js";
 import { registerReports } from "./routes/reports.js";
 import { registerListingReview } from "./routes/listing-review.js";
+import { registerActivity } from "./routes/activity.js";
 import { registerVehicles } from "./routes/vehicles.js";
 import { registerViewings } from "./routes/viewings.js";
 import { registerServices } from "./routes/services.js";
@@ -97,6 +98,7 @@ export function createApp() {
   registerConversations(app);
   registerReports(app);
   registerListingReview(app);
+  registerActivity(app);
   // ── Vehicles lane + logged viewings (Phase 3 C) ───────────────────────────
   registerVehicles(app);
   registerViewings(app);

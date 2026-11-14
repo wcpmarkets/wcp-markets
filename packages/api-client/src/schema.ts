@@ -1506,6 +1506,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Everything in motion across the lanes: deals, viewings, quote requests (22d) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Items, the caller's moves first, then newest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ActivityItem"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vehicles/catalog": {
         parameters: {
             query?: never;
@@ -7952,6 +8004,27 @@ export interface components {
             /** @enum {string} */
             decision: "approve" | "reject";
             note?: string;
+        };
+        ActivityItem: {
+            /** @enum {string} */
+            kind: "deal" | "viewing" | "quote_request";
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            lane: "goods" | "property" | "vehicles" | "services";
+            title: string;
+            imageUrl: string | null;
+            line: string;
+            status: string;
+            /** @enum {string|null} */
+            action: "confirm" | "pay" | "respond" | "hand_off" | "review" | null;
+            /** Format: uuid */
+            dealId: string | null;
+            /** Format: uuid */
+            conversationId: string | null;
+            /** Format: uuid */
+            listingId: string;
+            updatedAt: string;
         };
         VehicleModel: {
             name: string;

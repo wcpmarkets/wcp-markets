@@ -1397,6 +1397,95 @@
           "decision"
         ]
       },
+      "ActivityItem": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "deal",
+              "viewing",
+              "quote_request"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lane": {
+            "type": "string",
+            "enum": [
+              "goods",
+              "property",
+              "vehicles",
+              "services"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "line": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "action": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "confirm",
+              "pay",
+              "respond",
+              "hand_off",
+              "review"
+            ]
+          },
+          "dealId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "listingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "lane",
+          "title",
+          "imageUrl",
+          "line",
+          "status",
+          "action",
+          "dealId",
+          "conversationId",
+          "listingId",
+          "updatedAt"
+        ]
+      },
       "VehicleModel": {
         "type": "object",
         "properties": {
@@ -7340,6 +7429,47 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/activity": {
+      "get": {
+        "summary": "Everything in motion across the lanes: deals, viewings, quote requests (22d)",
+        "tags": [
+          "activity"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Items, the caller's moves first, then newest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActivityItem"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
           },
           "503": {
             "description": "Database unavailable",
