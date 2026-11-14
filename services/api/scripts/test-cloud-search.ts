@@ -70,6 +70,8 @@ async function main() {
   // Present iff a result matches `sub` AND belongs to this run (shares the tag).
   const has = (items: Item[], sub: string) =>
     items.some((i) => i.title.includes(sub) && i.title.includes(tag));
+  // Only this run's listings: live data (demo listings) can match the same words.
+  const mine = (items: Item[]) => items.filter((i) => i.title.includes(tag));
 
   // 1) full-text — must find the target AND discriminate (no unrelated Office Desk).
   const iphone = await search(`q=iphone`);
@@ -92,14 +94,14 @@ async function main() {
   check("filter condition=new → Samsung only", byCond.length === 1 && byCond[0]!.title.includes("Samsung"));
 
   const byPrice = await search(`q=${tag}&minPrice=40000000&maxPrice=90000000`);
-  check("filter price 40M–90M → iPhone + MacBook", byPrice.length === 2, titles(byPrice).join(", "));
+  check("filter price 40M–90M → iPhone + MacBook", mine(byPrice).length === 2, titles(byPrice).join(", "));
 
   const byLoc = await search(`q=${tag}&location=lagos`);
-  check("filter location=lagos → iPhone + MacBook", byLoc.length === 2, `${byLoc.length}`);
+  check("filter location=lagos → iPhone + MacBook", mine(byLoc).length === 2, `${byLoc.length}`);
 
   // 4) combined query + filter
   const combo = await search(`q=pro+${tag}&location=lagos`);
-  check("q='pro' + Lagos → iPhone Pro + MacBook Pro", combo.length === 2, titles(combo).join(", "));
+  check("q='pro' + Lagos → iPhone Pro + MacBook Pro", mine(combo).length === 2, titles(combo).join(", "));
 
   // 5) ranking — 'macbook pro' should rank the MacBook first
   const ranked = await search(`q=macbook+pro+${tag}`);
