@@ -221,7 +221,8 @@ const ListingUpdateSchema = z
     status: z.enum(SELLER_STATUSES).optional(),
     /**
      * Goods details to change, merged key by key into what's stored (delivery, brand,
-     * specs, warranty). A key sent as null clears it; delivery can't be cleared.
+     * specs, warranty). A key sent as null, or named in `clear`, is removed; delivery
+     * can't be cleared. `clear` exists for clients whose JSON drops null fields.
      */
     goodsDetails: z
       .object({
@@ -233,6 +234,7 @@ const ListingUpdateSchema = z
         itemType: z.string().trim().min(1).max(30).nullable().optional(),
         size: z.string().trim().min(1).max(20).nullable().optional(),
         warranty: z.enum(WARRANTIES).nullable().optional(),
+        clear: z.array(z.enum(["brand", "storage", "ram", "screen", "itemType", "size", "warranty"])).max(7).optional(),
       })
       .openapi("GoodsDetailsUpdate")
       .optional(),
@@ -972,7 +974,9 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         if (!cur) return c.json({ error: "not_found" }, 404);
         if (cur.lane !== "goods") return c.json({ error: "not_goods" }, 422);
         const attrs: Record<string, unknown> = { ...(cur.attributes ?? {}) };
-        for (const [k, v] of Object.entries(g)) {
+        const { clear, ...set } = g;
+        for (const k of clear ?? []) delete attrs[k];
+        for (const [k, v] of Object.entries(set)) {
           if (v === undefined) continue;
           if (v === null) delete attrs[k];
           else attrs[k] = v;

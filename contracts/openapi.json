@@ -2923,6 +2923,22 @@
               "12m",
               "manufacturer"
             ]
+          },
+          "clear": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "brand",
+                "storage",
+                "ram",
+                "screen",
+                "itemType",
+                "size",
+                "warranty"
+              ]
+            },
+            "maxItems": 7
           }
         }
       },

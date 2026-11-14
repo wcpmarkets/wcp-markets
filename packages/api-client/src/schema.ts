@@ -8155,6 +8155,7 @@ export interface components {
             size?: string | null;
             /** @enum {string|null} */
             warranty?: "none" | "7d" | "14d" | "1m" | "3m" | "6m" | "12m" | "manufacturer" | null;
+            clear?: ("brand" | "storage" | "ram" | "screen" | "itemType" | "size" | "warranty")[];
         };
         ListingUpdate: {
             category?: string;
