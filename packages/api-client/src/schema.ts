@@ -1358,6 +1358,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/listings/held": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listings held by publish-time screening, oldest first (staff only) */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Held listings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HeldListing"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not staff */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/listings/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve or reject a held listing (staff only) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ListingReviewDecision"];
+                };
+            };
+            responses: {
+                /** @description Reviewed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListingReviewed"];
+                    };
+                };
+                /** @description A rejection needs a note */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not staff, or staff's own listing */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such held listing */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vehicles/catalog": {
         parameters: {
             query?: never;
@@ -7773,6 +7921,38 @@ export interface components {
             action: "dismiss" | "remove_listing" | "uphold";
             note?: string;
         };
+        HeldListingFlag: {
+            code: string;
+            detail: string;
+        };
+        HeldListing: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            description: string | null;
+            lane: string;
+            category: string;
+            /** Format: int64 */
+            priceKobo: number;
+            state: string | null;
+            city: string | null;
+            imageUrls: string[];
+            flags: components["schemas"]["HeldListingFlag"][];
+            seller: components["schemas"]["UserSummary"];
+            createdAt: string;
+            screenedAt: string | null;
+        };
+        ListingReviewed: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "active" | "removed";
+        };
+        ListingReviewDecision: {
+            /** @enum {string} */
+            decision: "approve" | "reject";
+            note?: string;
+        };
         VehicleModel: {
             name: string;
             /** @enum {string} */
@@ -8069,6 +8249,17 @@ export interface components {
             /** @enum {string} */
             warranty?: "none" | "7d" | "14d" | "1m" | "3m" | "6m" | "12m" | "manufacturer";
         };
+        ScreeningFlag: {
+            /** @enum {string} */
+            code: "contact_details" | "off_platform_payment" | "price_far_below";
+            detail: string;
+        };
+        ListingReview: {
+            flags: components["schemas"]["ScreeningFlag"][];
+            /** @enum {string|null} */
+            decision: "approved" | "rejected" | null;
+            note: string | null;
+        } | null;
         Listing: {
             /** Format: uuid */
             id: string;
@@ -8093,7 +8284,8 @@ export interface components {
             state: string | null;
             city: string | null;
             /** @enum {string} */
-            status: "draft" | "active" | "sold" | "archived" | "under_review" | "removed";
+            status: "draft" | "active" | "sold" | "archived" | "under_review" | "removed" | "held";
+            review?: components["schemas"]["ListingReview"];
             imageUrls: string[];
             createdAt: string;
             updatedAt: string;

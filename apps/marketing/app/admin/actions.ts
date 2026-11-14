@@ -94,6 +94,7 @@ const ERRORS: Record<string, string> = {
   not_found: "It's no longer open — probably already handled.",
   wrong_state: "It's no longer awaiting a decision.",
   no_listing: "There's no listing to remove for this report.",
+  note_required: "Write the reason — the seller reads it.",
   unreachable: "Couldn't reach the API. Nothing was changed.",
 };
 const explain = (e: string) => ERRORS[e] ?? `The API refused (${e}). Nothing was changed.`;
@@ -124,6 +125,20 @@ export async function resolveReport(_: ActionState, form: FormData): Promise<Act
   // No revalidate: the card stays and shows the outcome; counts refresh on the next page load.
   const n = r.data.resolved;
   return { ok: true, message: `Closed ${n} report${n === 1 ? "" : "s"}${r.data.listingStatus ? ` · listing is now ${r.data.listingStatus.replace("_", " ")}` : ""}.` };
+}
+
+export async function reviewListing(_: ActionState, form: FormData): Promise<ActionState> {
+  const id = String(form.get("listingId") ?? "");
+  const decision = String(form.get("decision") ?? "");
+  const note = String(form.get("note") ?? "").trim();
+  if (!UUID.test(id) || (decision !== "approve" && decision !== "reject")) return { error: "Bad request." };
+  if (decision === "reject" && note.length < 10) return { error: "Write the reason (at least 10 characters) — the seller reads it." };
+  const r = await adminApi(`/admin/listings/${id}/review`, {
+    method: "POST",
+    body: { decision, ...(note ? { note: note.slice(0, 500) } : {}) },
+  });
+  if (!r.ok) return { error: explain(r.error) };
+  return { ok: true, message: decision === "approve" ? "Approved — it's on sale and the seller was told." : "Rejected — the seller was told why." };
 }
 
 export async function decideRecovery(_: ActionState, form: FormData): Promise<ActionState> {

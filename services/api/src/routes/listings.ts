@@ -20,6 +20,7 @@ import {
   createSignedUploadUrl,
 } from "../supabase.js";
 import type { Sql } from "../deals/commands.js";
+import { screenListing, type ScreeningFlag } from "../listings/screening.js";
 import { DELIVERY_METHODS, ListingDeliverySchema, listingDeliveryProblem } from "../deals/delivery.js";
 import { UserSummarySchema, userSummaries, type UserSummary } from "../profiles/summary.js";
 
@@ -38,8 +39,9 @@ const SELLER_STATUSES = ["draft", "active", "sold", "archived"] as const;
  * (taken down by staff) are set only by moderation — migration 0023's trigger
  * enforces it — and, like drafts, are never publicly readable.
  */
-const STATUSES = [...SELLER_STATUSES, "under_review", "removed"] as const;
-const MODERATED: readonly string[] = ["under_review", "removed"];
+const STATUSES = [...SELLER_STATUSES, "under_review", "removed", "held"] as const;
+/** held: publish-time screening found something (0041) — staff approve or reject it. */
+const MODERATED: readonly string[] = ["under_review", "removed", "held"];
 export const LANES = ["goods", "property", "vehicles", "services"] as const;
 export const PROPERTY_TYPES = ["apartment", "house", "land", "commercial", "shop", "office"] as const;
 export const DEAL_TYPES = ["rent", "sale", "shortlet"] as const;
@@ -50,6 +52,15 @@ const IMAGE_TYPES = {
 } as const;
 
 // ── Schemas (all named → clean TS/Kotlin/Swift codegen) ──────────────────────
+const ListingReviewSchema = z
+  .object({
+    flags: z.array(z.object({ code: z.enum(["contact_details", "off_platform_payment", "price_far_below"]), detail: z.string() }).openapi("ScreeningFlag")),
+    decision: z.enum(["approved", "rejected"]).nullable(),
+    /** Staff's note on a rejection, shown to the seller. */
+    note: z.string().nullable(),
+  })
+  .openapi("ListingReview");
+
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 /** ₦1,000 — a shortlet's nightly rate floor (escrow fees floor at ₦100). */
 const MIN_NIGHTLY_KOBO = 100_000;
@@ -176,6 +187,11 @@ export const ListingSchema = z
     state: z.string().nullable(),
     city: z.string().nullable(),
     status: z.enum(STATUSES),
+    /**
+     * Why the listing is held, or why staff rejected it (13d-flagged). Only on held
+     * listings and rejected ones — both visible to their owner alone. Null otherwise.
+     */
+    review: ListingReviewSchema.nullable().optional(),
     imageUrls: z.array(z.string()),
     createdAt: z.string(),
     updatedAt: z.string(),
@@ -299,6 +315,9 @@ const ImageUploadSchema = z
 // Raw DB shape (bigint arrives as string from postgres.js).
 export type ListingRow = Row;
 type Row = {
+  screening?: ScreeningFlag[] | null;
+  review_decision?: "approved" | "rejected" | null;
+  review_note?: string | null;
   id: string;
   seller_id: string;
   lane: string;
@@ -351,10 +370,42 @@ async function toListing(r: Row, seller: UserSummary): Promise<z.infer<typeof Li
     state: r.state,
     city: r.city,
     status: r.status,
+    review:
+      r.status === "held" || (r.status === "removed" && r.review_decision === "rejected")
+        ? { flags: r.screening ?? [], decision: r.review_decision ?? null, note: r.review_note ?? null }
+        : null,
     imageUrls,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
+}
+
+/**
+ * Re-run screening after a seller's edit and move the listing between active and
+ * held to match. Flags staff already approved don't hold it again.
+ */
+async function rescreen(db: Sql, r: Row): Promise<Row> {
+  if (r.status !== "active" && r.status !== "held") return r;
+  const all = await screenListing(db, {
+    id: r.id, sellerId: r.seller_id, lane: r.lane, category: r.category, condition: r.condition,
+    priceKobo: Number(r.price_kobo), title: r.title, description: r.description,
+  });
+  const approved = r.review_decision === "approved" ? new Set((r.screening ?? []).map((f) => f.code)) : new Set<string>();
+  const flags = all.filter((f) => !approved.has(f.code));
+  const next = flags.length ? "held" : "active";
+  if (next === r.status && !flags.length) return r;
+  const [row] = (await db.begin(async (tx) => {
+    await tx`select set_config('wcp.moderating', 'on', true)`;
+    return tx<Row[]>`
+      update public.listings
+      set status = ${next},
+          screening = ${flags.length ? tx.json(flags as never) : (approved.size ? tx.json(r.screening as never) : null)},
+          screened_at = now(),
+          review_decision = ${flags.length ? null : (r.review_decision ?? null)}
+      where id = ${r.id}
+      returning ${tx.unsafe(LISTING_SELECT)}`;
+  })) as Row[];
+  return row ?? r;
 }
 
 /** Map rows to the API shape, batch-loading each distinct seller's summary once. */
@@ -365,7 +416,7 @@ export async function toListings(db: Sql, rows: Row[]): Promise<z.infer<typeof L
 
 export const LISTING_SELECT = `id, seller_id, lane, category, title, description, price_kobo,
   currency, negotiable, stock, condition, attributes, location, state, city, image_paths,
-  status, created_at, updated_at`;
+  status, screening, review_decision, review_note, created_at, updated_at`;
 
 /** Query params every browse surface shares, so /listings and /listings/search
  * scope identically. */
@@ -593,16 +644,23 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       // out of every ring drawn around it, which reads as a bug.
       const lat = b.lat ?? centre?.lat ?? null;
       const lng = b.lng ?? centre?.lng ?? null;
+      const condition = b.lane === "vehicles" ? (b.attributes?.vehicleCondition === "brand_new" ? "new" : "used") : (b.condition ?? "used");
+      // 13d-flagged: anything the rules catch holds the listing for a quick human check.
+      const flags = await screenListing(db, {
+        sellerId: user.sub, lane: b.lane, category: b.category, condition, priceKobo,
+        title: b.title, description: b.description ?? null,
+      });
       const rows = await db<Row[]>`
         insert into public.listings
           (seller_id, lane, category, title, description, price_kobo, negotiable, stock,
-           condition, attributes, location, state, city, lat, lng)
+           condition, attributes, location, state, city, lat, lng, status, screening, screened_at)
         values (
           ${user.sub}, ${b.lane}, ${b.category}, ${b.title}, ${b.description ?? null},
           ${priceKobo}, ${b.negotiable ?? true}, ${b.lane === "vehicles" || b.lane === "services" ? 1 : (b.stock ?? 1)},
-          ${b.lane === "vehicles" ? (b.attributes?.vehicleCondition === "brand_new" ? "new" : "used") : (b.condition ?? "used")},
+          ${condition},
           ${db.json(b.attributes ?? {})},
-          ${b.location ?? null}, ${b.state ?? null}, ${b.city ?? null}, ${lat}, ${lng}
+          ${b.location ?? null}, ${b.state ?? null}, ${b.city ?? null}, ${lat}, ${lng},
+          ${flags.length ? "held" : "active"}, ${flags.length ? db.json(flags as never) : null}, now()
         )
         returning ${db.unsafe(LISTING_SELECT)}
       `;
@@ -1000,7 +1058,11 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         returning ${db.unsafe(LISTING_SELECT)}
       `;
       if (!rows[0]) return c.json({ error: "not_found" }, 404);
-      return c.json((await toListings(db, [rows[0]]))[0]!, 200);
+      // What the screening reads changed: check again. A fix clears a hold; a new
+      // problem on a live listing holds it.
+      const screened = ["title", "description", "price_kobo", "category", "condition"].some((k) => k in cols);
+      const row = screened ? await rescreen(db, rows[0]) : rows[0];
+      return c.json((await toListings(db, [row]))[0]!, 200);
     },
   );
 

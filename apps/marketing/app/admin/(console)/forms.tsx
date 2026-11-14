@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { decideRecovery, resolveDispute, resolveReport, type ActionState } from "../actions";
+import { decideRecovery, resolveDispute, resolveReport, reviewListing, type ActionState } from "../actions";
 
 const Result = ({ s }: { s: ActionState }) =>
   s.error ? (
@@ -111,6 +111,33 @@ export function RecoveryDecision({ recoveryId }: { recoveryId: string }) {
           <button name="decision" value="reject" disabled={pending} className={`${btn} border border-line`}>Reject</button>
         </div>
       )}
+      <Result s={state} />
+    </form>
+  );
+}
+
+/** Approve puts a held listing on sale; reject removes it and the note goes to the seller. */
+export function ListingReview({ listingId }: { listingId: string }) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(reviewListing, {});
+  const [note, setNote] = useState("");
+  if (state.ok) return <Result s={state} />;
+  return (
+    <form action={action} className="flex flex-col gap-2">
+      <input type="hidden" name="listingId" value={listingId} />
+      <input
+        name="note"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        maxLength={500}
+        placeholder="Reason (required to reject — the seller reads it)"
+        className="rounded-lg border border-line bg-canvas px-3 py-1.5 text-sm outline-none focus:border-brand-cyan"
+      />
+      <div className="flex flex-wrap gap-2">
+        <button name="decision" value="approve" disabled={pending} className={`${btn} border border-line`}>Approve</button>
+        <button name="decision" value="reject" disabled={pending} className={`${btn} border border-[#e5645a]/50 text-[#e5645a]`}>
+          Reject
+        </button>
+      </div>
       <Result s={state} />
     </form>
   );

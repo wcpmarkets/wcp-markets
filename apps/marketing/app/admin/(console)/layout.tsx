@@ -1,15 +1,16 @@
 import Link from "next/link";
-import { adminApi, type AdminRecovery, type DisputeQueueItem, type ReportQueueItem } from "@/lib/admin";
+import { adminApi, type AdminRecovery, type DisputeQueueItem, type HeldListing, type ReportQueueItem } from "@/lib/admin";
 import { adminLogout } from "../actions";
 import { NavLink } from "./nav-link";
 
 export const dynamic = "force-dynamic";
 
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
-  const [d, r, rc] = await Promise.all([
+  const [d, r, rc, h] = await Promise.all([
     adminApi<DisputeQueueItem[]>("/admin/disputes"),
     adminApi<ReportQueueItem[]>("/admin/reports?limit=100"),
     adminApi<AdminRecovery[]>("/admin/recoveries"),
+    adminApi<HeldListing[]>("/admin/listings/held?limit=100"),
   ]);
   const n = (x: { ok: boolean; data?: unknown[] }) => (x.ok ? (x as { data: unknown[] }).data.length : null);
 
@@ -21,6 +22,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
           <nav className="flex flex-wrap gap-1 text-sm">
             <NavLink href="/admin/disputes" count={n(d)}>Disputes</NavLink>
             <NavLink href="/admin/reports" count={n(r)}>Reports</NavLink>
+            <NavLink href="/admin/held" count={n(h)}>Held listings</NavLink>
             <NavLink href="/admin/recoveries" count={n(rc)}>Recoveries</NavLink>
           </nav>
           <form action={adminLogout} className="ml-auto">

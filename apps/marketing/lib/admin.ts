@@ -11,6 +11,7 @@ export type DisputeQueueItem = S["DisputeQueueItem"];
 export type DisputeDetail = S["DisputeDetail"];
 export type ReportQueueItem = S["ReportQueueItem"];
 export type AdminRecovery = S["AdminRecovery"];
+export type HeldListing = S["HeldListing"];
 export type UserSummary = S["UserSummary"];
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };

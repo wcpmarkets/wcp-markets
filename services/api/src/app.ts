@@ -11,6 +11,7 @@ import { registerWebhooks } from "./routes/webhooks.js";
 import { registerProfiles } from "./routes/profiles.js";
 import { registerConversations } from "./routes/conversations.js";
 import { registerReports } from "./routes/reports.js";
+import { registerListingReview } from "./routes/listing-review.js";
 import { registerVehicles } from "./routes/vehicles.js";
 import { registerViewings } from "./routes/viewings.js";
 import { registerServices } from "./routes/services.js";
@@ -95,6 +96,7 @@ export function createApp() {
   // ── Conversations + inbox (Phase 3 A) ─────────────────────────────────────
   registerConversations(app);
   registerReports(app);
+  registerListingReview(app);
   // ── Vehicles lane + logged viewings (Phase 3 C) ───────────────────────────
   registerVehicles(app);
   registerViewings(app);
