@@ -8338,6 +8338,9 @@ export interface components {
             /** Format: uuid */
             senderId: string;
             body: string;
+            /** @enum {string|null} */
+            kind: "delivery_fee" | "coverage_request" | "coverage_reply" | "handoff_window" | null;
+            meta: components["schemas"]["MessageMeta"];
             createdAt: string;
         };
         MessageCreate: {

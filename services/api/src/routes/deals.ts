@@ -1,6 +1,7 @@
 import { type OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { auth, type AuthEnv } from "../middleware/auth.js";
 import { getDb } from "../db.js";
+import { MESSAGE_KINDS, MessageMetaSchema, type MessageKind } from "../messages/kinds.js";
 import { createOffer, transition, type DealRow, type DealTerms, type Sql } from "../deals/commands.js";
 import { CHECKOUT_TTL_MIN, openCheckout, quote, railFor, type Rail } from "../money/checkout.js";
 import { PaystackError } from "../money/paystack.js";
@@ -157,6 +158,9 @@ const MessageSchema = z
     dealId: z.string().uuid(),
     senderId: z.string().uuid(),
     body: z.string(),
+    /** A structured card (0040): delivery fee, coverage request/reply, hand-off window. Null for plain chat. */
+    kind: z.enum(MESSAGE_KINDS).nullable(),
+    meta: MessageMetaSchema.nullable(),
     createdAt: z.string(),
   })
   .openapi("Message");
@@ -813,10 +817,10 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       if (!deal || (deal.buyer_id !== user.sub && deal.seller_id !== user.sub))
         return c.json({ error: "not_found" }, 404);
       const rows = await db<
-        { id: number | string; deal_id: string | null; sender_id: string; body: string; created_at: string | Date }[]
+        { id: number | string; deal_id: string | null; sender_id: string; body: string; kind: MessageKind | null; meta: Record<string, unknown> | null; created_at: string | Date }[]
       >`
         -- The deal's whole conversation, including chat from before the offer.
-        select m.id, m.deal_id, m.sender_id, m.body, m.created_at
+        select m.id, m.deal_id, m.sender_id, m.body, m.kind, m.meta, m.created_at
         from public.messages m
         join public.conversations cv on cv.id = m.conversation_id
         join public.deals d on d.listing_id = cv.listing_id and d.buyer_id = cv.buyer_id
@@ -829,6 +833,8 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
           dealId: m.deal_id ?? id,
           senderId: m.sender_id,
           body: m.body,
+          kind: m.kind ?? null,
+          meta: (m.meta ?? null) as never,
           createdAt: iso(m.created_at),
         })),
         200,
@@ -878,7 +884,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         returning id, deal_id, sender_id, body, created_at
       `;
       return c.json(
-        { id: Number(m!.id), dealId: m!.deal_id, senderId: m!.sender_id, body: m!.body, createdAt: iso(m!.created_at) },
+        { id: Number(m!.id), dealId: m!.deal_id, senderId: m!.sender_id, body: m!.body, kind: null, meta: null, createdAt: iso(m!.created_at) },
         201,
       );
     },

@@ -3642,6 +3642,21 @@
           "body": {
             "type": "string"
           },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "delivery_fee",
+              "coverage_request",
+              "coverage_reply",
+              "handoff_window"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/MessageMeta"
+          },
           "createdAt": {
             "type": "string"
           }
@@ -3651,6 +3666,8 @@
           "dealId",
           "senderId",
           "body",
+          "kind",
+          "meta",
           "createdAt"
         ]
       },
