@@ -99,7 +99,8 @@ async function main() {
 
     console.log("3) decline without a reason still works");
     const L2 = await mk("neg plain");
-    const o2 = await call(buyer.token, "POST", `/listings/${L2}/offers`, { priceKobo: P, delivery: { method: "meet" } });
+    const o2 = await call(buyer.token, "POST", `/listings/${L2}/offers`, { priceKobo: P, delivery: { method: "meet", place: "Yaba bus stop" } });
+    check("second offer → 201", o2.status === 201, `${o2.status} ${JSON.stringify(o2.body)}`);
     const dp = await call(seller.token, "POST", `/deals/${o2.body.id}/actions`, { action: "decline" });
     check("plain decline → DECLINED", dp.status === 200 && dp.body.state === "DECLINED", `${dp.status}`);
     const ev2 = (await call(buyer.token, "GET", `/deals/${o2.body.id}`)).body.events as any[];
