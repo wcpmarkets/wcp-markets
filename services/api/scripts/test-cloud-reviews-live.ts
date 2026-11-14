@@ -43,7 +43,7 @@ async function main() {
   const st = async (id: string, t: string) => ((await (await fetch(`${API}/deals/${id}`, { headers: H(t) })).json()) as { state: string }).state;
   try {
     const P = 18_000_000;
-    const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ category: "phones", title: "lr", priceKobo: P, stock: 1 }) });
+    const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title: "lr", priceKobo: P, stock: 1 }) });
     const listing = (await lr.json()) as { id: string };
     const or = await fetch(`${API}/listings/${listing.id}/offers`, { method: "POST", headers: H(buyer.token), body: JSON.stringify({ priceKobo: P }) });
     const deal = (await or.json()) as { id: string };

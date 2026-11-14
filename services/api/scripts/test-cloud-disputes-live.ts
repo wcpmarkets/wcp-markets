@@ -46,7 +46,7 @@ async function main() {
   try {
     await sql`insert into public.staff_roles (user_id, role) values (${adminU.id}, 'admin') on conflict (user_id) do update set role = 'admin'`;
     const P = 22_000_000;
-    const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ category: "phones", title: "ld", priceKobo: P, stock: 1 }) });
+    const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title: "ld", priceKobo: P, stock: 1 }) });
     const listing = (await lr.json()) as { id: string };
     const or = await fetch(`${API}/listings/${listing.id}/offers`, { method: "POST", headers: H(buyer.token), body: JSON.stringify({ priceKobo: P }) });
     const deal = (await or.json()) as { id: string };

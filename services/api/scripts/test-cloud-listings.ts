@@ -66,7 +66,7 @@ async function main() {
     method: "POST",
     headers: { Authorization: `Bearer ${seller.token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      category: "phones", title: "iPhone 12 — clean", description: "Barely used",
+      category: "phones", title: "iPhone 12 — clean", description: "Barely used", attributes: { delivery: { modes: ["meet"] } },
       priceKobo: 25_000_000, condition: "used", location: "Bayelsa", stock: 1,
     }),
   });

@@ -50,7 +50,7 @@ async function main() {
   const dbUrl = process.env.DATABASE_URL ?? (await fetchSsm(process.env.DATABASE_URL_SSM ?? "/wcp/api/database-url"));
   const sql = postgres(dbUrl!, { prepare: false, max: 2 });
   const listing = async (t: string, title: string) =>
-    ((await (await fetch(`${API}/listings`, { method: "POST", headers: H(t), body: JSON.stringify({ category: "phones", title, priceKobo: 5_000_000, stock: 1 }) })).json()) as { id: string }).id;
+    ((await (await fetch(`${API}/listings`, { method: "POST", headers: H(t), body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title, priceKobo: 5_000_000, stock: 1 }) })).json()) as { id: string }).id;
 
   try {
     const leaver = await newUser("del-a-", "Leaving Seller");

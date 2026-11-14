@@ -57,7 +57,7 @@ async function makeListing(sellerTok: string, title: string): Promise<string> {
   const r = await fetch(`${API}/listings`, {
     method: "POST",
     headers: H(sellerTok),
-    body: JSON.stringify({ category: "phones", title, priceKobo: 30_000_000 }),
+    body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title, priceKobo: 30_000_000 }),
   });
   return ((await r.json()) as { id: string }).id;
 }

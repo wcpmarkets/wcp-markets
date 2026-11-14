@@ -87,7 +87,7 @@ async function main() {
   const sumAcct = async (dealId: string, acct: string) =>
     Number((await sql<{ s: string }[]>`select coalesce(sum(amount_kobo),0)::bigint as s from public.ledger_entries where deal_id = ${dealId} and account = ${acct}`)[0]!.s);
   const newDeal = async (P: number) => {
-    const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ category: "phones", title: "ps", priceKobo: P, stock: 1 }) });
+    const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title: "ps", priceKobo: P, stock: 1 }) });
     const listing = (await lr.json()) as { id: string };
     const or = await fetch(`${API}/listings/${listing.id}/offers`, { method: "POST", headers: H(buyer.token), body: JSON.stringify({ priceKobo: P }) });
     const deal = (await or.json()) as { id: string };

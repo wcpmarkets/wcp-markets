@@ -83,7 +83,7 @@ async function main() {
     check("deleting the default promotes the remaining one", list.length === 1 && list[0]!.id === a1.id && list[0]!.isDefault);
 
     // ── Listing carries the seller summary ────────────────────────────────
-    const lr = await api("/listings", seller.token, { method: "POST", body: JSON.stringify({ category: "phones", title: "pi phone", priceKobo: 10_000_000, stock: 2, state: "Lagos", city: "Yaba" }) });
+    const lr = await api("/listings", seller.token, { method: "POST", body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title: "pi phone", priceKobo: 10_000_000, stock: 2, state: "Lagos", city: "Yaba" }) });
     const listing = await j<{ id: string; seller: { storeName: string | null; verified: boolean } }>(lr);
     check("listing.seller.storeName present", listing.seller?.storeName === "Dami's Test Gadgets", JSON.stringify(listing.seller));
 

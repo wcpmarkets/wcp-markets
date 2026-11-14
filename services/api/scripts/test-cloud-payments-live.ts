@@ -56,7 +56,7 @@ async function main() {
     const P = 30_000_000; // ₦300k
     const FEE = buyerFeeKobo(P);
     const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token),
-      body: JSON.stringify({ category: "phones", title: "live-pay", priceKobo: P, stock: 1 }) });
+      body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title: "live-pay", priceKobo: P, stock: 1 }) });
     const listing = (await lr.json()) as { id: string };
 
     const or = await fetch(`${API}/listings/${listing.id}/offers`, { method: "POST", headers: H(buyer.token),

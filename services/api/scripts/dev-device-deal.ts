@@ -29,7 +29,7 @@ r = await fetch(`${BASE}/auth/v1/admin/users`, { method: "POST", headers: admin,
 const sellerId = ((await r.json()) as any).id;
 const ss = await signIn({ email: se, password: sp });
 await fetch(`${API}/me`, { method: "PATCH", headers: H(ss.access_token), body: JSON.stringify({ displayName: "Device Test Seller" }) });
-const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(ss.access_token), body: JSON.stringify({ category: "phones", title: "Device test — Nokia 105", priceKobo: 500_000, stock: 1 }) });
+const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(ss.access_token), body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title: "Device test — Nokia 105", priceKobo: 500_000, stock: 1 }) });
 const listing = (await lr.json()) as any;
 const or = await fetch(`${API}/listings/${listing.id}/offers`, { method: "POST", headers: H(bs.access_token), body: JSON.stringify({ priceKobo: 500_000 }) });
 const deal = (await or.json()) as any;

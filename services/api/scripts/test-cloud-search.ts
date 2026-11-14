@@ -63,7 +63,7 @@ async function main() {
     { title: `Office Desk ${tag}`, category: `furniture-${tag}`, priceKobo: 5_000_000, condition: "new", location: "Bayelsa" },
   ];
   for (const s of seed) {
-    await fetch(`${API}/listings`, { method: "POST", headers: authed, body: JSON.stringify(s) });
+    await fetch(`${API}/listings`, { method: "POST", headers: authed, body: JSON.stringify({ ...s, attributes: { delivery: { modes: ["meet"] } } }) });
   }
   console.log(`0) seeded ${seed.length} listings (tag=${tag})`);
 

@@ -59,7 +59,7 @@ async function main() {
     }
   };
   const listing = async (t: string, title: string, priceKobo: number) =>
-    ((await (await fetch(`${API}/listings`, { method: "POST", headers: H(t), body: JSON.stringify({ category: "phones", title, priceKobo, stock: 1 }) })).json()) as { id: string }).id;
+    ((await (await fetch(`${API}/listings`, { method: "POST", headers: H(t), body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title, priceKobo, stock: 1 }) })).json()) as { id: string }).id;
   const reprice = (t: string, id: string, priceKobo: number) =>
     fetch(`${API}/listings/${id}`, { method: "PATCH", headers: H(t), body: JSON.stringify({ priceKobo }) });
 

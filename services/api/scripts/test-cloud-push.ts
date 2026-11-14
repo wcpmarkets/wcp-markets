@@ -86,7 +86,7 @@ async function main() {
     await put(buyer.token, bTok);
 
     console.log("B. offer → seller");
-    const listing = (await (await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ category: "phones", title: "Push test — Tecno Spark", priceKobo: 800_000, stock: 1 }) })).json()) as { id: string };
+    const listing = (await (await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title: "Push test — Tecno Spark", priceKobo: 800_000, stock: 1 }) })).json()) as { id: string };
     const deal = (await (await fetch(`${API}/listings/${listing.id}/offers`, { method: "POST", headers: H(buyer.token), body: JSON.stringify({ priceKobo: 800_000 }) })).json()) as { id: string };
     const offer = await note(`deal:${deal.id}:1:seller`);
     check("seller told of the offer", offer.n?.title === "New offer: ₦8,000", JSON.stringify(offer.n?.title));

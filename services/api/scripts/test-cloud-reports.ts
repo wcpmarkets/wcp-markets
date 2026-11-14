@@ -51,7 +51,7 @@ async function main() {
   const staff = await newUser("rp-staff");
   const users = [seller, buyer, r2, r3, staff];
   const newListing = async (title: string) =>
-    j<{ id: string }>(await api("/listings", seller.token, { method: "POST", body: JSON.stringify({ category: "phones", title, priceKobo: 5_000_000, stock: 1, state: "Lagos", city: "Yaba" }) }));
+    j<{ id: string }>(await api("/listings", seller.token, { method: "POST", body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title, priceKobo: 5_000_000, stock: 1, state: "Lagos", city: "Yaba" }) }));
   const publicStatus = async (id: string) => (await api(`/listings/${id}`, null)).status;
   try {
     await sql`insert into public.staff_roles (user_id, role) values (${staff.id}, 'admin') on conflict (user_id) do update set role = 'admin'`;

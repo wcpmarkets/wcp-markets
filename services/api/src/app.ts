@@ -52,6 +52,22 @@ export function createApp() {
     if (db) await kickOutbox(db);
   });
 
+  // POST /deals/{id}/pay takes an optional body (expectedTotalKobo, 0040). Clients that
+  // predate it send no body — sometimes still labelled application/json, which the
+  // route's validator would reject as malformed JSON. An empty body means "{}".
+  app.use("/deals/:id/pay", async (c, next) => {
+    if (c.req.method === "POST") {
+      const text = await c.req.raw.clone().text();
+      if (!text.trim()) {
+        const headers = new Headers(c.req.raw.headers);
+        headers.set("content-type", "application/json");
+        headers.delete("content-length");
+        c.req.raw = new Request(c.req.raw.url, { method: "POST", headers, body: "{}" });
+      }
+    }
+    await next();
+  });
+
   // ── GET /health ───────────────────────────────────────────────────────────
   const HealthSchema = z
     .object({ status: z.literal("ok"), ts: z.string() })

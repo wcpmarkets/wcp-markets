@@ -45,7 +45,7 @@ async function main() {
   try {
     const P = 25_000_000;
     const PAYOUT = P - sellerFeeKobo(P);
-    const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ category: "phones", title: "liv-ful", priceKobo: P, stock: 1 }) });
+    const lr = await fetch(`${API}/listings`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ attributes: { delivery: { modes: ["meet"] } }, category: "phones", title: "liv-ful", priceKobo: P, stock: 1 }) });
     const listing = (await lr.json()) as { id: string };
     const or = await fetch(`${API}/listings/${listing.id}/offers`, { method: "POST", headers: H(buyer.token), body: JSON.stringify({ priceKobo: P }) });
     const deal = (await or.json()) as { id: string };

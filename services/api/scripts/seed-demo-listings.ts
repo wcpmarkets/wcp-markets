@@ -59,7 +59,7 @@ async function main() {
 
   let ok = 0;
   for (const l of LISTINGS) {
-    const r = await fetch(`${API}/listings`, { method: "POST", headers: H(token), body: JSON.stringify(l) });
+    const r = await fetch(`${API}/listings`, { method: "POST", headers: H(token), body: JSON.stringify({ ...l, attributes: { delivery: { modes: ["deliver", "meet"] } } }) });
     if (r.ok) { ok++; console.log(`  ✓ ${l.title}`); }
     else console.log(`  ✗ ${l.title} — ${r.status} ${await r.text()}`);
   }
