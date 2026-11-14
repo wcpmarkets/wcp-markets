@@ -186,12 +186,12 @@ export async function settleRelease(
   p: { dealId: string; providerRef: string; amountKobo: number },
 ): Promise<SettleResult> {
   return db.begin(async (sql) => {
-    const [d] = await sql<{ state: string; price_kobo: string | number }[]>`
-      select state, price_kobo from public.deals where id = ${p.dealId}
+    const [d] = await sql<{ state: string; principal_kobo: string | number }[]>`
+      select state, principal_kobo from public.deals where id = ${p.dealId}
     `;
     if (!d) return { ok: false, reason: "unknown_deal" };
     if (d.state !== "COMPLETED") return { ok: false, reason: `not_completed:${d.state}` };
-    const principal = Number(d.price_kobo);
+    const principal = Number(d.principal_kobo);
     const sellerFee = sellerFeeKobo(principal);
     const expectedPayout = principal - sellerFee;
     if (p.amountKobo !== expectedPayout)
@@ -215,12 +215,12 @@ export async function settleRefund(
   p: { dealId: string; amountKobo: number; providerRef: string },
 ): Promise<SettleResult> {
   return db.begin(async (sql) => {
-    const [d] = await sql<{ state: string; price_kobo: string | number }[]>`
-      select state, price_kobo from public.deals where id = ${p.dealId}
+    const [d] = await sql<{ state: string; principal_kobo: string | number }[]>`
+      select state, principal_kobo from public.deals where id = ${p.dealId}
     `;
     if (!d) return { ok: false, reason: "unknown_deal" };
     if (d.state !== "REFUNDED") return { ok: false, reason: `not_refunded:${d.state}` };
-    const principal = Number(d.price_kobo);
+    const principal = Number(d.principal_kobo);
     const staged = await stageRefundKobo(sql, p.dealId);
     if (staged != null) return settleStageRefund(sql, p, staged);
     // The refund must reverse exactly what the hold booked.

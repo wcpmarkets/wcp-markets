@@ -435,7 +435,7 @@ export function registerDisputes(app: OpenAPIHono<AuthEnv>) {
         }[]
       >`
         select d.id as deal_id, d.state as deal_state, d.buyer_id, d.seller_id,
-               l.title as listing_title, d.price_kobo as principal, -- price_kobo is the deal TOTAL (0008)
+               l.title as listing_title, d.principal_kobo as principal, -- items (price_kobo, 0008) + delivery fee (0040)
                c.status, c.reason, c.opened_by, c.created_at, c.responded_at,
                (select count(*) from public.deal_events e
                 where e.action = 'dispute' and e.actor_id = d.buyer_id

@@ -2821,6 +2821,14 @@ export interface paths {
                     dealType?: "rent" | "sale" | "shortlet";
                     minBeds?: number | null;
                     verified?: "true";
+                    brand?: string;
+                    storage?: string;
+                    ram?: string;
+                    screen?: string;
+                    itemType?: string;
+                    size?: string;
+                    delivery?: "deliver" | "meet" | "pickup";
+                    warranty?: "true";
                     sort?: "relevance" | "price_asc" | "price_desc" | "newest" | "mileage_asc";
                     limit?: number;
                     offset?: number | null;
@@ -3282,6 +3290,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Delivery choice doesn't fit the listing (delivery_method_not_offered, outside_delivery_coverage, delivery_needs_state, meet_needs_place) */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Database unavailable */
                 503: {
                     headers: {
@@ -3523,7 +3540,11 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["PayRequest"];
+                };
+            };
             responses: {
                 /** @description Payment initiated */
                 200: {
@@ -3548,7 +3569,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Not payable in this state */
+                /** @description Not payable in this state; delivery_fee_pending (the seller hasn't set the delivery fee); total_changed (the total moved since it was shown) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -3910,6 +3931,374 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/deals/{id}/delivery-fee": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Seller pins the delivery fee agreed in chat (unpaid deliver deals) */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["DeliveryFeeSet"];
+                };
+            };
+            responses: {
+                /** @description Pinned */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Deal"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Blocked */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not allowed in this state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Invalid */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{id}/coverage-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Buyer asks the seller to deliver to a state outside their coverage */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CoverageRequest"];
+                };
+            };
+            responses: {
+                /** @description Asked */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeliveryCard"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Blocked */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not allowed in this state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Invalid */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{id}/coverage-reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Seller answers a delivery request: add the state (with a fee) or can't */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CoverageReply"];
+                };
+            };
+            responses: {
+                /** @description Answered */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeliveryCard"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Blocked */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not allowed in this state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Invalid */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/deals/{id}/handoff-window": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Seller confirms when the paid item changes hands (20g) */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["HandoffWindow"];
+                };
+            };
+            responses: {
+                /** @description Confirmed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Deal"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Blocked */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not allowed in this state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Invalid */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7300,6 +7689,14 @@ export interface components {
             nextCursor: string | null;
             unreadConversations: number;
         };
+        MessageMeta: {
+            /** Format: int64 */
+            feeKobo?: number | null;
+            state?: string | null;
+            /** @enum {string} */
+            status?: "pending" | "accepted" | "declined";
+            window?: string | null;
+        } | null;
         ConversationMessage: {
             id: number;
             /** Format: uuid */
@@ -7309,6 +7706,9 @@ export interface components {
             /** Format: uuid */
             senderId: string;
             body: string;
+            /** @enum {string|null} */
+            kind: "delivery_fee" | "coverage_request" | "coverage_reply" | "handoff_window" | null;
+            meta: components["schemas"]["MessageMeta"];
             createdAt: string;
         };
         ConversationMessageCreate: {
@@ -7622,6 +8022,10 @@ export interface components {
             /** Format: int64 */
             fromKobo?: number;
         };
+        ListingDelivery: {
+            modes: ("deliver" | "meet" | "pickup")[];
+            states?: string[];
+        };
         ListingAttributes: {
             /** @enum {string} */
             propertyType?: "apartment" | "house" | "land" | "commercial" | "shop" | "office";
@@ -7655,6 +8059,15 @@ export interface components {
             coverageKm?: number;
             coverageAnywhere?: boolean;
             availability?: ("today" | "this_week" | "emergency")[];
+            delivery?: components["schemas"]["ListingDelivery"];
+            brand?: string;
+            storage?: string;
+            ram?: string;
+            screen?: string;
+            itemType?: string;
+            size?: string;
+            /** @enum {string} */
+            warranty?: "none" | "7d" | "14d" | "1m" | "3m" | "6m" | "12m" | "manufacturer";
         };
         Listing: {
             /** Format: uuid */
@@ -7732,6 +8145,17 @@ export interface components {
             total: number;
             states: components["schemas"]["StateFacet"][];
         };
+        GoodsDetailsUpdate: {
+            delivery?: components["schemas"]["ListingDelivery"];
+            brand?: string | null;
+            storage?: string | null;
+            ram?: string | null;
+            screen?: string | null;
+            itemType?: string | null;
+            size?: string | null;
+            /** @enum {string|null} */
+            warranty?: "none" | "7d" | "14d" | "1m" | "3m" | "6m" | "12m" | "manufacturer" | null;
+        };
         ListingUpdate: {
             category?: string;
             title?: string;
@@ -7747,6 +8171,7 @@ export interface components {
             city?: string;
             /** @enum {string} */
             status?: "draft" | "active" | "sold" | "archived";
+            goodsDetails?: components["schemas"]["GoodsDetailsUpdate"];
         };
         ImageUpload: {
             path: string;
@@ -7798,6 +8223,19 @@ export interface components {
             milestones?: components["schemas"]["StagePlan"][];
             booking?: components["schemas"]["BookingTerms"];
         };
+        DeliveryChoice: {
+            /** @enum {string} */
+            method: "deliver" | "meet" | "pickup";
+            state?: string;
+            place?: string;
+            when?: string;
+        };
+        DealDelivery: components["schemas"]["DeliveryChoice"] & {
+            /** Format: int64 */
+            feeKobo: number | null;
+            window: string | null;
+            suggestedFeesKobo?: number[];
+        };
         DealMilestone: {
             idx: number;
             title: string;
@@ -7847,6 +8285,7 @@ export interface components {
             priceKobo: number;
             qty: number;
             terms?: components["schemas"]["DealTerms"];
+            delivery?: components["schemas"]["DealDelivery"];
             milestones?: components["schemas"]["DealMilestone"][];
             payment?: components["schemas"]["PaymentQuote"];
             checkout?: components["schemas"]["Checkout"];
@@ -7857,6 +8296,7 @@ export interface components {
             /** Format: int64 */
             priceKobo: number;
             qty?: number;
+            delivery?: components["schemas"]["DeliveryChoice"];
         };
         DealEvent: {
             seq: number;
@@ -7881,6 +8321,11 @@ export interface components {
             priceKobo?: number;
             qty?: number;
             milestones?: components["schemas"]["StagePlan"][];
+            delivery?: components["schemas"]["DeliveryChoice"];
+        };
+        PayRequest: {
+            /** Format: int64 */
+            expectedTotalKobo?: number;
         };
         CancelRefundRequest: {
             reason?: string;
@@ -7896,6 +8341,34 @@ export interface components {
         };
         MessageCreate: {
             body: string;
+        };
+        DeliveryFeeSet: {
+            /** Format: int64 */
+            feeKobo: number;
+        };
+        DeliveryCard: {
+            id: number;
+            /** Format: uuid */
+            conversationId: string;
+            /** Format: uuid */
+            dealId: string | null;
+            /** Format: uuid */
+            senderId: string;
+            body: string;
+            kind: string | null;
+            createdAt: string;
+        };
+        CoverageRequest: {
+            state: string;
+        };
+        CoverageReply: {
+            state: string;
+            accept: boolean;
+            /** Format: int64 */
+            feeKobo?: number;
+        };
+        HandoffWindow: {
+            window: string;
         };
         DisputeCase: {
             /** Format: uuid */

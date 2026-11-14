@@ -932,6 +932,41 @@
           "unreadConversations"
         ]
       },
+      "MessageMeta": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "feeKobo": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "accepted",
+              "declined"
+            ]
+          },
+          "window": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "ConversationMessage": {
         "type": "object",
         "properties": {
@@ -956,6 +991,21 @@
           "body": {
             "type": "string"
           },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "delivery_fee",
+              "coverage_request",
+              "coverage_reply",
+              "handoff_window"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/MessageMeta"
+          },
           "createdAt": {
             "type": "string"
           }
@@ -966,6 +1016,8 @@
           "dealId",
           "senderId",
           "body",
+          "kind",
+          "meta",
           "createdAt"
         ]
       },
@@ -2246,6 +2298,34 @@
           "name"
         ]
       },
+      "ListingDelivery": {
+        "type": "object",
+        "properties": {
+          "modes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "deliver",
+                "meet",
+                "pickup"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 3
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 37
+          }
+        },
+        "required": [
+          "modes"
+        ]
+      },
       "ListingAttributes": {
         "type": "object",
         "properties": {
@@ -2407,6 +2487,52 @@
               ]
             },
             "maxItems": 3
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/ListingDelivery"
+          },
+          "brand": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "storage": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "ram": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "screen": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "itemType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 30
+          },
+          "size": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "warranty": {
+            "type": "string",
+            "enum": [
+              "none",
+              "7d",
+              "14d",
+              "1m",
+              "3m",
+              "6m",
+              "12m",
+              "manufacturer"
+            ]
           }
         }
       },
@@ -2728,6 +2854,78 @@
           "states"
         ]
       },
+      "GoodsDetailsUpdate": {
+        "type": "object",
+        "properties": {
+          "delivery": {
+            "$ref": "#/components/schemas/ListingDelivery"
+          },
+          "brand": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "storage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "ram": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "screen": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "itemType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 30
+          },
+          "size": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "warranty": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "none",
+              "7d",
+              "14d",
+              "1m",
+              "3m",
+              "6m",
+              "12m",
+              "manufacturer"
+            ]
+          }
+        }
+      },
       "ListingUpdate": {
         "type": "object",
         "properties": {
@@ -2791,6 +2989,9 @@
               "sold",
               "archived"
             ]
+          },
+          "goodsDetails": {
+            "$ref": "#/components/schemas/GoodsDetailsUpdate"
           }
         }
       },
@@ -3000,6 +3201,69 @@
           "service"
         ]
       },
+      "DeliveryChoice": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "deliver",
+              "meet",
+              "pickup"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "place": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "when": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "required": [
+          "method"
+        ]
+      },
+      "DealDelivery": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DeliveryChoice"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "feeKobo": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              },
+              "window": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "suggestedFeesKobo": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              }
+            },
+            "required": [
+              "feeKobo",
+              "window"
+            ]
+          }
+        ]
+      },
       "DealMilestone": {
         "type": "object",
         "properties": {
@@ -3150,6 +3414,9 @@
           "terms": {
             "$ref": "#/components/schemas/DealTerms"
           },
+          "delivery": {
+            "$ref": "#/components/schemas/DealDelivery"
+          },
           "milestones": {
             "type": "array",
             "items": {
@@ -3194,6 +3461,9 @@
           "qty": {
             "type": "integer",
             "exclusiveMinimum": 0
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/DeliveryChoice"
           }
         },
         "required": [
@@ -3311,11 +3581,24 @@
               "$ref": "#/components/schemas/StagePlan"
             },
             "maxItems": 6
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/DeliveryChoice"
           }
         },
         "required": [
           "action"
         ]
+      },
+      "PayRequest": {
+        "type": "object",
+        "properties": {
+          "expectedTotalKobo": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "format": "int64"
+          }
+        }
       },
       "CancelRefundRequest": {
         "type": "object",
@@ -3366,6 +3649,113 @@
         },
         "required": [
           "body"
+        ]
+      },
+      "DeliveryFeeSet": {
+        "type": "object",
+        "properties": {
+          "feeKobo": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50000000,
+            "format": "int64"
+          }
+        },
+        "required": [
+          "feeKobo"
+        ]
+      },
+      "DeliveryCard": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dealId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "senderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "body": {
+            "type": "string"
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversationId",
+          "dealId",
+          "senderId",
+          "body",
+          "kind",
+          "createdAt"
+        ]
+      },
+      "CoverageRequest": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "CoverageReply": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "accept": {
+            "type": "boolean"
+          },
+          "feeKobo": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50000000,
+            "format": "int64"
+          }
+        },
+        "required": [
+          "state",
+          "accept"
+        ]
+      },
+      "HandoffWindow": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          }
+        },
+        "required": [
+          "window"
         ]
       },
       "DisputeCase": {
@@ -8339,6 +8729,84 @@
           {
             "schema": {
               "type": "string",
+              "maxLength": 40
+            },
+            "required": false,
+            "name": "brand",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 20
+            },
+            "required": false,
+            "name": "storage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 20
+            },
+            "required": false,
+            "name": "ram",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 20
+            },
+            "required": false,
+            "name": "screen",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 30
+            },
+            "required": false,
+            "name": "itemType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 20
+            },
+            "required": false,
+            "name": "size",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "deliver",
+                "meet",
+                "pickup"
+              ]
+            },
+            "required": false,
+            "name": "delivery",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            },
+            "required": false,
+            "name": "warranty",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
                 "relevance",
                 "price_asc",
@@ -8797,6 +9265,16 @@
               }
             }
           },
+          "422": {
+            "description": "Delivery choice doesn't fit the listing (delivery_method_not_offered, outside_delivery_coverage, delivery_needs_state, meet_needs_place)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Database unavailable",
             "content": {
@@ -9016,6 +9494,16 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Payment initiated",
@@ -9034,7 +9522,7 @@
             "description": "Not found"
           },
           "409": {
-            "description": "Not payable in this state",
+            "description": "Not payable in this state; delivery_fee_pending (the seller hasn't set the delivery fee); total_changed (the total moved since it was shown)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9372,6 +9860,370 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deals/{id}/delivery-fee": {
+      "put": {
+        "summary": "Seller pins the delivery fee agreed in chat (unpaid deliver deals)",
+        "tags": [
+          "deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryFeeSet"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pinned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Not allowed in this state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{id}/coverage-request": {
+      "post": {
+        "summary": "Buyer asks the seller to deliver to a state outside their coverage",
+        "tags": [
+          "conversations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoverageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Asked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Not allowed in this state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{id}/coverage-reply": {
+      "post": {
+        "summary": "Seller answers a delivery request: add the state (with a fee) or can't",
+        "tags": [
+          "conversations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoverageReply"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Answered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Not allowed in this state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deals/{id}/handoff-window": {
+      "put": {
+        "summary": "Seller confirms when the paid item changes hands (20g)",
+        "tags": [
+          "deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandoffWindow"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Not allowed in this state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "503": {
             "description": "Database unavailable",

@@ -45,7 +45,7 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     select coalesce(sum(amount_kobo), 0)::bigint as total from public.ledger_entries
   `;
   const drift = await db<{ deal_id: string; esc: string; principal: string; state: string }[]>`
-    select le.deal_id, sum(le.amount_kobo)::bigint as esc, d.price_kobo::bigint as principal, d.state
+    select le.deal_id, sum(le.amount_kobo)::bigint as esc, d.principal_kobo::bigint as principal, d.state
     from public.ledger_entries le
     join public.deals d on d.id = le.deal_id
     left join lateral (
@@ -55,8 +55,8 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
       from public.deal_milestones m where m.deal_id = d.id and m.status in ('released', 'refunded')
     ) st on true
     where le.account = 'escrow_holding'
-    group by le.deal_id, d.price_kobo, d.state, st.released
-    having sum(le.amount_kobo) not in (0, d.price_kobo - st.released)
+    group by le.deal_id, d.principal_kobo, d.state, st.released
+    having sum(le.amount_kobo) not in (0, d.principal_kobo - st.released)
   `;
   const overdue = await db<{ deal_id: string; esc: string; state: string }[]>`
     select le.deal_id, sum(le.amount_kobo)::bigint as esc, d.state

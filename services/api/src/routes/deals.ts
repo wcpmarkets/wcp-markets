@@ -6,6 +6,16 @@ import { CHECKOUT_TTL_MIN, openCheckout, quote, railFor, type Rail } from "../mo
 import { PaystackError } from "../money/paystack.js";
 import { rescaleStages, stageProblem, MAX_STAGES, type StageRow } from "../deals/stages.js";
 import { isBlockedEitherWay } from "../profiles/summary.js";
+import {
+  DealDeliverySchema,
+  DeliveryChoiceSchema,
+  deliveryChoiceProblem,
+  feePending,
+  listingDelivery,
+  nextDelivery,
+  principalOf,
+  type DealDelivery,
+} from "../deals/delivery.js";
 
 /**
  * M3 — offers/deals + chat. Buyers open offers on listings; both parties drive the
@@ -75,7 +85,7 @@ const DealMilestoneSchema = z
   })
   .openapi("DealMilestone");
 
-const DealSchema = z
+export const DealSchema = z
   .object({
     id: z.string().uuid(),
     listingId: z.string().uuid(),
@@ -87,6 +97,11 @@ const DealSchema = z
     priceKobo: z.number().int().nonnegative(),
     qty: z.number().int().positive(),
     terms: DealTermsSchema.optional(),
+    /**
+     * Goods: how the item changes hands (7h-offer, 13b-delivery). priceKobo is the items;
+     * a deliver fee rides on top and is part of what escrow holds (payment.principalKobo).
+     */
+    delivery: DealDeliverySchema.optional(),
     /** A staged job's stages with their money status (absent when unstaged). */
     milestones: z.array(DealMilestoneSchema).optional(),
     /** The buyer's price breakdown while the deal awaits payment (absent otherwise). */
@@ -148,10 +163,23 @@ const MessageSchema = z
 
 const OfferCreateSchema = z
   .object({
+    /** The whole amount for the items (unit × qty) — never per unit (0008). */
     priceKobo: z.number().int().nonnegative(),
     qty: z.number().int().positive().optional(),
+    /** Goods: how the buyer wants it — one of the listing's delivery modes. */
+    delivery: DeliveryChoiceSchema.optional(),
   })
   .openapi("OfferCreate");
+
+const PayRequestSchema = z
+  .object({
+    /**
+     * The total the buyer was shown. If the deal's total has moved since (a new
+     * delivery fee), the pay is refused with total_changed rather than charging more.
+     */
+    expectedTotalKobo: z.number().int().positive().optional(),
+  })
+  .openapi("PayRequest");
 
 const DealActionSchema = z
   .object({
@@ -163,6 +191,8 @@ const DealActionSchema = z
      * priceKobo ([] drops the split). Omitted, a staged quote keeps its proportions.
      */
     milestones: z.array(StagePlanSchema).max(MAX_STAGES).optional(),
+    /** Goods counters only: change how the item changes hands. Omitted, it stays as agreed. */
+    delivery: DeliveryChoiceSchema.optional(),
   })
   .openapi("DealAction");
 
@@ -204,8 +234,11 @@ async function dealsOut(db: Sql, deals: DealRow[], uid: string): Promise<DealOut
   const checkouts = new Map<string, NonNullable<DealOut["checkout"]>>();
   for (const d of due) {
     const rail = d.payment_provider ?? (myRail ??= await railFor(db, uid));
-    payments.set(d.id, quote(rail, Number(d.price_kobo)));
+    payments.set(d.id, quote(rail, principalOf(d)));
   }
+  // 7h-feereply: a seller who still owes a delivery fee gets their recent fees as chips.
+  const owing = deals.filter((d) => d.seller_id === uid && feePending(d.delivery));
+  const suggested = owing.length ? await recentFees(db, uid) : [];
   const pendingIds = due.filter((d) => d.state === "PAYMENT_PENDING" && d.payment_provider === "paystack").map((d) => d.id);
   if (pendingIds.length) {
     const open = await db<{ deal_id: string; reference: string; authorization_url: string; access_code: string; gross_kobo: string; processing_fee_kobo: string; created_at: Date }[]>`
@@ -223,11 +256,37 @@ async function dealsOut(db: Sql, deals: DealRow[], uid: string): Promise<DealOut
   return deals.map((d) => ({
     ...toDeal(d, uid),
     milestones: milestonesOf(d, rows.filter((r) => r.deal_id === d.id)),
+    delivery: d.delivery ? deliveryOut(d.delivery, d.seller_id === uid && feePending(d.delivery) ? suggested : undefined) : undefined,
     payment: payments.get(d.id),
     checkout: checkouts.get(d.id),
   }));
 }
-const dealOut = async (db: Sql, d: DealRow, uid: string) => (await dealsOut(db, [d], uid))[0]!;
+export const dealOut = async (db: Sql, d: DealRow, uid: string) => (await dealsOut(db, [d], uid))[0]!;
+
+function deliveryOut(d: DealDelivery, suggestedFeesKobo?: number[]): z.infer<typeof DealDeliverySchema> {
+  return {
+    method: d.method,
+    state: d.state,
+    place: d.place,
+    when: d.when,
+    feeKobo: d.feeKobo ?? null,
+    window: d.window ?? null,
+    ...(suggestedFeesKobo ? { suggestedFeesKobo } : {}),
+  };
+}
+
+/** A seller's last few distinct delivery fees, newest first — the 7h-feereply chips. */
+async function recentFees(db: Sql, sellerId: string): Promise<number[]> {
+  const rows = await db<{ fee: string }[]>`
+    select fee from (
+      select distinct on ((delivery->>'feeKobo')::bigint) (delivery->>'feeKobo')::bigint as fee, updated_at
+      from public.deals
+      where seller_id = ${sellerId} and delivery->>'feeKobo' is not null
+      order by (delivery->>'feeKobo')::bigint, updated_at desc
+    ) f order by updated_at desc limit 3
+  `;
+  return rows.map((r) => Number(r.fee));
+}
 
 function toDeal(d: DealRow, uid: string): DealOut {
   return {
@@ -241,6 +300,7 @@ function toDeal(d: DealRow, uid: string): DealOut {
     priceKobo: Number(d.price_kobo),
     qty: d.qty,
     terms: d.terms ?? undefined,
+    delivery: d.delivery ? deliveryOut(d.delivery) : undefined,
     createdAt: iso(d.created_at),
     updatedAt: iso(d.updated_at),
   };
@@ -269,6 +329,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         401: { description: "Unauthorized" },
         403: { description: "Blocked", content: { "application/json": { schema: ErrorSchema } } },
         409: { description: "Listing unavailable, lead-gen lane, a services listing (the provider quotes first), or a shortlet (book_first)", content: { "application/json": { schema: ErrorSchema } } },
+        422: { description: "Delivery choice doesn't fit the listing (delivery_method_not_offered, outside_delivery_coverage, delivery_needs_state, meet_needs_place)", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -286,9 +347,11 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         buyerId: user.sub,
         priceKobo: b.priceKobo,
         qty: b.qty ?? 1,
+        delivery: b.delivery,
         idempotencyKey: idem(c),
       });
       if (!r.ok) {
+        if (r.code === "delivery") return c.json({ error: r.detail }, 422);
         if (r.code === "own_listing") return c.json({ error: "cannot_offer_own_listing" }, 400);
         if (r.code === "lead_gen_lane") return c.json({ error: "lead_gen_lane" }, 409);
         if (r.code === "quote_first") return c.json({ error: "quote_first" }, 409);
@@ -418,13 +481,26 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       const { id } = c.req.valid("param");
       const b = c.req.valid("json");
 
-      const [deal] = await db<{ buyer_id: string; seller_id: string; terms: DealTerms | null }[]>`
-        select buyer_id, seller_id, terms from public.deals where id = ${id}
+      const [deal] = await db<
+        { buyer_id: string; seller_id: string; terms: DealTerms | null; delivery: DealDelivery | null; lane: string; attributes: Record<string, unknown> | null; listing_state: string | null }[]
+      >`
+        select d.buyer_id, d.seller_id, d.terms, d.delivery, l.lane, l.attributes, l.state as listing_state
+        from public.deals d join public.listings l on l.id = d.listing_id where d.id = ${id}
       `;
       if (!deal || (deal.buyer_id !== user.sub && deal.seller_id !== user.sub))
         return c.json({ error: "not_found" }, 404);
       if (b.action === "counter" && b.priceKobo == null)
         return c.json({ error: "counter_requires_price" }, 400);
+
+      // A counter may change how the item changes hands (goods only). A new method or
+      // destination drops the pinned fee — it was quoted for the old one.
+      let delivery: DealDelivery | undefined;
+      if (b.delivery) {
+        if (b.action !== "counter" || deal.lane !== "goods") return c.json({ error: "delivery_only_on_goods_counter" }, 400);
+        const bad = deliveryChoiceProblem(b.delivery, listingDelivery(deal.attributes as never, deal.listing_state));
+        if (bad) return c.json({ error: bad }, 422);
+        delivery = nextDelivery(deal.delivery, b.delivery);
+      }
 
       const actor = deal.buyer_id === user.sub ? "BUYER" : "SELLER";
 
@@ -456,6 +532,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         priceKobo: b.priceKobo,
         qty: b.qty,
         terms,
+        delivery,
         idempotencyKey: idem(c),
       });
       if (!r.ok) {
@@ -485,13 +562,16 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       tags: ["deals"],
       security: [{ bearerAuth: [] }],
       middleware: [auth] as const,
-      request: { params: z.object({ id: z.string().uuid() }) },
+      request: {
+        params: z.object({ id: z.string().uuid() }),
+        body: { content: { "application/json": { schema: PayRequestSchema } }, required: false },
+      },
       responses: {
         200: { description: "Payment initiated", content: { "application/json": { schema: DealSchema } } },
         401: { description: "Unauthorized" },
         404: { description: "Not found" },
         502: { description: "Could not open a Paystack checkout (deal left ACCEPTED)", content: { "application/json": { schema: ErrorSchema } } },
-        409: { description: "Not payable in this state", content: { "application/json": { schema: ErrorSchema } } },
+        409: { description: "Not payable in this state; delivery_fee_pending (the seller hasn't set the delivery fee); total_changed (the total moved since it was shown)", content: { "application/json": { schema: ErrorSchema } } },
         503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
       },
     }),
@@ -500,11 +580,25 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const { id } = c.req.valid("param");
-      const [deal] = await db<{ buyer_id: string; state: string; payment_provider: string | null }[]>`
-        select buyer_id, state, payment_provider from public.deals where id = ${id}
+      const [deal] = await db<
+        { buyer_id: string; state: string; payment_provider: string | null; delivery: DealDelivery | null; principal_kobo: string }[]
+      >`
+        select buyer_id, state, payment_provider, delivery, principal_kobo from public.deals where id = ${id}
       `;
       // Only the buyer pays (a seller sees the same 404 as a stranger).
       if (!deal || deal.buyer_id !== user.sub) return c.json({ error: "not_found" }, 404);
+      const expected = (await c.req.json().catch(() => ({}))) as { expectedTotalKobo?: unknown };
+
+      if (deal.state === "ACCEPTED") {
+        // 13b-nodelivery: the seller delivers but no fee is agreed — escrow can't total.
+        if (feePending(deal.delivery)) return c.json({ error: "delivery_fee_pending" }, 409);
+        // The buyer pays what they saw, or nothing: a fee pinned since then must be seen first.
+        if (typeof expected.expectedTotalKobo === "number") {
+          // The rail pay is about to pick (an ACCEPTED deal is re-railed below).
+          if (quote(await railFor(db, user.sub), Number(deal.principal_kobo)).totalKobo !== expected.expectedTotalKobo)
+            return c.json({ error: "total_changed" }, 409);
+        }
+      }
 
       const checkoutFor = async () => {
         try {

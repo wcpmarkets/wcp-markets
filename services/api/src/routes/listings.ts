@@ -20,6 +20,7 @@ import {
   createSignedUploadUrl,
 } from "../supabase.js";
 import type { Sql } from "../deals/commands.js";
+import { DELIVERY_METHODS, ListingDeliverySchema, listingDeliveryProblem } from "../deals/delivery.js";
 import { UserSummarySchema, userSummaries, type UserSummary } from "../profiles/summary.js";
 
 /**
@@ -68,6 +69,9 @@ const RateItemSchema = z
 /** Shortlet / rental amenities, as the 13g-shortlet chips name them. */
 export const AMENITIES = ["power", "water", "wifi", "ac", "security", "parking", "kitchen", "pool"] as const;
 
+/** Goods warranty (13d-warranty): none, or how long the seller covers it. */
+export const WARRANTIES = ["none", "7d", "14d", "1m", "3m", "6m", "12m", "manufacturer"] as const;
+
 const ListingAttributesSchema = z
   .object({
     propertyType: z.enum(PROPERTY_TYPES).optional(),
@@ -100,6 +104,17 @@ const ListingAttributesSchema = z
     coverageKm: z.number().int().optional(),
     coverageAnywhere: z.boolean().optional(),
     availability: z.array(z.enum(AVAILABILITY)).max(AVAILABILITY.length).optional(),
+    // Goods (13d): how the item can change hands — at least one mode (12a) — and the
+    // optional details buyers filter on (13e-filters-goods). Spec values are the
+    // chip labels the app offers per category ("128GB", "16GB", "55\"", "M").
+    delivery: ListingDeliverySchema.optional(),
+    brand: z.string().trim().min(1).max(40).optional(),
+    storage: z.string().trim().min(1).max(20).optional(),
+    ram: z.string().trim().min(1).max(20).optional(),
+    screen: z.string().trim().min(1).max(20).optional(),
+    itemType: z.string().trim().min(1).max(30).optional(),
+    size: z.string().trim().min(1).max(20).optional(),
+    warranty: z.enum(WARRANTIES).optional(),
   })
   .openapi("ListingAttributes");
 
@@ -204,6 +219,23 @@ const ListingUpdateSchema = z
     state: z.string().max(64).optional(),
     city: z.string().max(64).optional(),
     status: z.enum(SELLER_STATUSES).optional(),
+    /**
+     * Goods details to change, merged key by key into what's stored (delivery, brand,
+     * specs, warranty). A key sent as null clears it; delivery can't be cleared.
+     */
+    goodsDetails: z
+      .object({
+        delivery: ListingDeliverySchema.optional(),
+        brand: z.string().trim().min(1).max(40).nullable().optional(),
+        storage: z.string().trim().min(1).max(20).nullable().optional(),
+        ram: z.string().trim().min(1).max(20).nullable().optional(),
+        screen: z.string().trim().min(1).max(20).nullable().optional(),
+        itemType: z.string().trim().min(1).max(30).nullable().optional(),
+        size: z.string().trim().min(1).max(20).nullable().optional(),
+        warranty: z.enum(WARRANTIES).nullable().optional(),
+      })
+      .openapi("GoodsDetailsUpdate")
+      .optional(),
   })
   .openapi("ListingUpdate");
 
@@ -420,6 +452,14 @@ export type SearchParams = {
   minBeds?: number;
   /** Only sellers who passed ID verification (level 2+). */
   verified?: "true";
+  brand?: string;
+  storage?: string;
+  ram?: string;
+  screen?: string;
+  itemType?: string;
+  size?: string;
+  delivery?: (typeof DELIVERY_METHODS)[number];
+  warranty?: "true";
 };
 
 /** The WHERE for a search: active listings narrowed by every filter that's set. */
@@ -451,6 +491,16 @@ export function searchWhere(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, 
   if (p.dealType) where = db`${where} and attributes->>'dealType' = ${p.dealType}`;
   if (p.minBeds != null) where = db`${where} and (attributes->>'beds')::int >= ${p.minBeds}`;
   if (p.verified === "true") where = db`${where} and seller_id in (select id from public.profiles where verification_level >= 2)`;
+  if (p.brand) where = db`${where} and lower(attributes->>'brand') = lower(${p.brand})`;
+  if (p.storage) where = db`${where} and attributes->>'storage' = ${p.storage}`;
+  if (p.ram) where = db`${where} and attributes->>'ram' = ${p.ram}`;
+  if (p.screen) where = db`${where} and attributes->>'screen' = ${p.screen}`;
+  if (p.itemType) where = db`${where} and attributes->>'itemType' = ${p.itemType}`;
+  if (p.size) where = db`${where} and attributes->>'size' = ${p.size}`;
+  // Older goods listings (before 0040) offer deliver + meet, as listingDelivery reads them.
+  if (p.delivery)
+    where = db`${where} and lane = 'goods' and coalesce(attributes->'delivery'->'modes', '["deliver","meet"]'::jsonb) ? ${p.delivery}`;
+  if (p.warranty === "true") where = db`${where} and coalesce(attributes->>'warranty', 'none') <> 'none'`;
   if (p.q)
     // FTS match OR a fuzzy word-similarity match on the title (typo tolerance;
     // word_similarity finds the best-matching word within the title, so a long
@@ -526,6 +576,12 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
       }
       if (b.lane === "services") {
         const problem = serviceProblem(b.category, b.attributes, b.state, b.city);
+        if (problem) return c.json({ error: problem }, 422);
+      }
+      // 12a: escrow releases against a hand-off, so goods must offer at least one way
+      // to receive the item.
+      if (b.lane === "goods") {
+        const problem = listingDeliveryProblem(b.attributes?.delivery);
         if (problem) return c.json({ error: problem }, 422);
       }
       // A service's listed price is derived from its rate card, never typed twice.
@@ -638,6 +694,17 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
           minBeds: z.coerce.number().int().min(0).max(50).optional(),
           /** "true" = only ID-verified sellers (13e-filters-services "Verified providers only"). */
           verified: z.enum(["true"]).optional(),
+          // Goods details (13e-filters-goods): exact chip values, case-insensitive brand.
+          brand: z.string().max(40).optional(),
+          storage: z.string().max(20).optional(),
+          ram: z.string().max(20).optional(),
+          screen: z.string().max(20).optional(),
+          itemType: z.string().max(30).optional(),
+          size: z.string().max(20).optional(),
+          /** Listings offering this way of receiving the item. */
+          delivery: z.enum(DELIVERY_METHODS).optional(),
+          /** "true" = listings with a warranty (seller-backed or manufacturer). */
+          warranty: z.enum(["true"]).optional(),
           /** relevance (default; newest when there's no query), price, newest, or lowest mileage. */
           sort: z.enum(["relevance", "price_asc", "price_desc", "newest", "mileage_asc"]).optional(),
           limit: z.coerce.number().int().min(1).max(50).optional(),
@@ -890,6 +957,27 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         // own fix; a stale coordinate would put the listing in the wrong ring.
         cols.lat = centre.lat;
         cols.lng = centre.lng;
+      }
+
+      // Goods details merge into attributes (other lanes' keys are untouched).
+      if (b.goodsDetails) {
+        const g = b.goodsDetails;
+        if (g.delivery) {
+          const problem = listingDeliveryProblem(g.delivery);
+          if (problem) return c.json({ error: problem }, 422);
+        }
+        const [cur] = await db<{ lane: string; attributes: Record<string, unknown> | null }[]>`
+          select lane, attributes from public.listings where id = ${id} and seller_id = ${user.sub}
+        `;
+        if (!cur) return c.json({ error: "not_found" }, 404);
+        if (cur.lane !== "goods") return c.json({ error: "not_goods" }, 422);
+        const attrs: Record<string, unknown> = { ...(cur.attributes ?? {}) };
+        for (const [k, v] of Object.entries(g)) {
+          if (v === undefined) continue;
+          if (v === null) delete attrs[k];
+          else attrs[k] = v;
+        }
+        cols.attributes = db.json(attrs as never);
       }
 
       if (Object.keys(cols).length === 0) {

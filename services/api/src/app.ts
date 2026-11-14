@@ -26,6 +26,7 @@ import { registerNotifications } from "./routes/notifications.js";
 import { registerWatch } from "./routes/watch.js";
 import { registerAccount } from "./routes/account.js";
 import { registerListingStats } from "./routes/listing-stats.js";
+import { registerDelivery } from "./routes/delivery.js";
 import { kickOutbox } from "./deals/sqs-relay.js";
 
 /**
@@ -164,6 +165,7 @@ export function createApp() {
 
   // ── Deals + chat (M3) ─────────────────────────────────────────────────────
   registerDeals(app);
+  registerDelivery(app);
 
   // ── Disputes (M6) ─────────────────────────────────────────────────────────
   registerDisputes(app);

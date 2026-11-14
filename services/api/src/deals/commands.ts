@@ -9,6 +9,13 @@ import {
 } from "./machine.js";
 import { EFFECTS } from "./effects.js";
 import { bookingPlan, type StagePlan } from "./stages.js";
+import {
+  deliveryChoiceProblem,
+  listingDelivery,
+  nextDelivery,
+  type DealDelivery,
+  type DeliveryChoice,
+} from "./delivery.js";
 
 /**
  * The deal command handler — the deterministic transactional core. Every command
@@ -36,6 +43,10 @@ export type DealRow = {
   qty: number;
   /** Service quotes only (0025): what the price is for, and when the job starts. */
   terms: DealTerms | null;
+  /** Goods hand-off terms (0040): method, where, when, the pinned fee. */
+  delivery?: DealDelivery | null;
+  /** price_kobo + the delivery fee — what escrow holds before the buyer fee (0040). */
+  principal_kobo?: string | number | null;
   /** The money rail, set at pay (0030): Paystack, or the mock for test accounts. */
   payment_provider?: "mock" | "paystack" | null;
   created_at: string | Date;
@@ -80,7 +91,9 @@ export type CommandResult =
 
 export type CreateResult =
   | { ok: true; deal: DealRow; existing?: boolean }
-  | { ok: false; code: "listing_unavailable" | "own_listing" | "lead_gen_lane" | "quote_first" | "book_first" };
+  | { ok: false; code: "listing_unavailable" | "own_listing" | "lead_gen_lane" | "quote_first" | "book_first" }
+  /** The delivery choice doesn't fit the listing (detail: deliveryChoiceProblem's code). */
+  | { ok: false; code: "delivery"; detail: string };
 
 export type BookingResult =
   | { ok: true; deal: DealRow; conversationId: string }
@@ -169,12 +182,23 @@ async function syncDeadline(
 /** Genesis: a buyer opens an offer on a listing → a new deal in OFFERED. */
 export async function createOffer(
   db: Sql,
-  p: { listingId: string; buyerId: string; priceKobo: number; qty: number; idempotencyKey?: string },
+  p: {
+    listingId: string;
+    buyerId: string;
+    priceKobo: number;
+    qty: number;
+    /** Goods: how the buyer wants it (7h-offer). Checked against what the listing offers. */
+    delivery?: DeliveryChoice;
+    idempotencyKey?: string;
+  },
 ): Promise<CreateResult> {
   return db.begin(async (sql) => {
     // Lock the listing so concurrent genesis on the same listing serialise.
-    const [listing] = await sql<{ seller_id: string; status: string; lane: string; deal_type: string | null }[]>`
-      select seller_id, status, lane, attributes->>'dealType' as deal_type from public.listings where id = ${p.listingId} for update
+    const [listing] = await sql<
+      { seller_id: string; status: string; lane: string; deal_type: string | null; attributes: Record<string, unknown> | null; state: string | null }[]
+    >`
+      select seller_id, status, lane, attributes->>'dealType' as deal_type, attributes, state
+      from public.listings where id = ${p.listingId} for update
     `;
     if (!listing || listing.status !== "active") return { ok: false, code: "listing_unavailable" };
     // Vehicles are lead-gen (22b): enquire, inspect, pay the dealer offline — no escrow.
@@ -194,9 +218,18 @@ export async function createOffer(
     `;
     if (existing) return { ok: true, deal: existing, existing: true };
 
+    // Delivery is a goods term (rentals and sales of property are viewed, not shipped).
+    let delivery: DealDelivery | null = null;
+    if (p.delivery && listing.lane === "goods") {
+      const bad = deliveryChoiceProblem(p.delivery, listingDelivery(listing.attributes as never, listing.state));
+      if (bad) return { ok: false, code: "delivery", detail: bad };
+      delivery = nextDelivery(null, p.delivery);
+    }
+
     const [deal] = await sql<DealRow[]>`
-      insert into public.deals (listing_id, buyer_id, seller_id, state, price_kobo, qty)
-      values (${p.listingId}, ${p.buyerId}, ${listing.seller_id}, 'OFFERED', ${p.priceKobo}, ${p.qty})
+      insert into public.deals (listing_id, buyer_id, seller_id, state, price_kobo, qty, delivery)
+      values (${p.listingId}, ${p.buyerId}, ${listing.seller_id}, 'OFFERED', ${p.priceKobo}, ${p.qty},
+              ${delivery ? sql.json(delivery) : null})
       returning *
     `;
     await sql`
@@ -407,6 +440,8 @@ export async function transition(
     qty?: number;
     /** Replace the deal's terms (a counter on a staged quote re-plans the stages). */
     terms?: DealTerms;
+    /** Replace the delivery terms (a counter that changes how the item changes hands). */
+    delivery?: DealDelivery;
     reason?: string;
     idempotencyKey?: string;
     /** SYSTEM timers pass the token they were scheduled with; a mismatch = stale, skip. */
@@ -478,9 +513,10 @@ export async function transition(
     const setPrice = p.priceKobo != null ? sql`, price_kobo = ${p.priceKobo}` : sql``;
     const setQty = p.qty != null ? sql`, qty = ${p.qty}` : sql``;
     const setTerms = p.terms ? sql`, terms = ${sql.json(p.terms)}` : sql``;
+    const setDelivery = p.delivery ? sql`, delivery = ${sql.json(p.delivery)}` : sql``;
     const updated = await sql<DealRow[]>`
       update public.deals
-      set state = ${to}, state_token = ${newToken} ${setPrice} ${setQty} ${setTerms}
+      set state = ${to}, state_token = ${newToken} ${setPrice} ${setQty} ${setTerms} ${setDelivery}
       where id = ${p.dealId} and state_token = ${deal.state_token}
       returning *
     `;

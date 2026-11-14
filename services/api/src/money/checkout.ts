@@ -81,7 +81,7 @@ async function customerEmail(db: Sql, userId: string): Promise<string> {
  * fresh, else a new one (new reference — Paystack references are single-use).
  */
 export async function openCheckout(db: Sql, dealId: string, buyerId: string): Promise<Checkout> {
-  const [d] = await db<{ price_kobo: string | number; state: string }[]>`select price_kobo, state from public.deals where id = ${dealId}`;
+  const [d] = await db<{ principal_kobo: string | number; state: string }[]>`select principal_kobo, state from public.deals where id = ${dealId}`;
   if (!d || d.state !== "PAYMENT_PENDING") throw new PaystackError(409, "not_payment_pending");
   const [open] = await db<PaymentRow[]>`
     select * from public.payments
@@ -90,7 +90,7 @@ export async function openCheckout(db: Sql, dealId: string, buyerId: string): Pr
     order by created_at desc limit 1`;
   if (open) return toCheckout(open);
 
-  const q = quote("paystack", Number(d.price_kobo));
+  const q = quote("paystack", Number(d.principal_kobo));
   const net = q.principalKobo + q.buyerFeeKobo;
   // Paystack references: alphanumerics, '-', '.', '='.
   const reference = `wcp-${dealId.slice(0, 8)}-${randomBytes(6).toString("hex")}`;

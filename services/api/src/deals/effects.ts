@@ -4,6 +4,7 @@ import { buyerFeeKobo, sellerFeeKobo } from "../money/fees.js";
 import { stageRefundKobo, writeHold } from "../money/ledger.js";
 import { bookingRoles, cancelTier, hostStagesFor, stageFees, stagesOf, type StageRow } from "./stages.js";
 import { checkInAt } from "./commands.js";
+import { principalOf } from "./delivery.js";
 
 /**
  * Per-action side effects, run INSIDE the transition tx after the deal is locked and
@@ -47,7 +48,7 @@ const releaseFunds: Effect = async (sql, { deal, seq, action }) => {
   const stages = await stagesOf(sql, deal.id, true);
   if (deal.terms?.booking) return bookingRelease(sql, deal, seq, action, stages);
   if (stages.length) return releaseStages(sql, deal, seq, action, stages);
-  const principal = Number(deal.price_kobo);
+  const principal = principalOf(deal);
   const sellerFee = sellerFeeKobo(principal);
   const reason =
     action === "resolve_release" ? "admin_release" : action === "auto_release" ? "auto_release" : "confirmed";
@@ -218,7 +219,7 @@ const refundBuyer: Effect = async (sql, { deal, seq, action }) => {
     from public.ledger_entries
     where deal_id = ${deal.id} and movement = 'hold' and account = 'external'
   `;
-  const principal = Number(deal.price_kobo);
+  const principal = principalOf(deal);
   // A staged job refunds only what is still held (stages.ts) — released stages are
   // the provider's. stageRefundKobo is the same rule the refund settlement checks.
   const staged = await stageRefundKobo(sql, deal.id);
@@ -250,7 +251,7 @@ export const EFFECTS: Partial<Record<DealAction, Effect>> = {
     // Paystack: the route opens a checkout and Paystack's webhook confirms — there's
     // no hold to ask an orchestrator for.
     if (deal.payment_provider === "paystack") return;
-    const principal = Number(deal.price_kobo);
+    const principal = principalOf(deal);
     const fee = buyerFeeKobo(principal);
     await sql`
       insert into public.outbox (topic, payload, deal_id, event_seq)
@@ -265,7 +266,7 @@ export const EFFECTS: Partial<Record<DealAction, Effect>> = {
   // stock. If stock is gone (oversold race), enqueue a refund and redirect to
   // REFUNDED; the refund ledger is written when refund.settled arrives (symmetry).
   payment_confirmed: async (sql, { deal, seq, providerRef, confirmedAmountKobo }) => {
-    const principal = Number(deal.price_kobo);
+    const principal = principalOf(deal);
     const amountHeld = confirmedAmountKobo ?? principal + buyerFeeKobo(principal);
     const fee = amountHeld - principal;
     await writeHold(sql, {

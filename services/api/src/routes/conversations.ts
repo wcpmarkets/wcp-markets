@@ -31,6 +31,26 @@ const ConversationListingSchema = z
   })
   .openapi("ConversationListing");
 
+/**
+ * Structured chat cards (0040). body is always a readable fallback.
+ *  - delivery_fee: the seller pinned a delivery fee to the deal (7h-feereply).
+ *  - coverage_request: the buyer asks to be delivered to a state outside coverage (12b-request).
+ *  - coverage_reply: the seller added the state (with an optional fee) or can't (12b-seller).
+ *  - handoff_window: the seller confirmed when the item changes hands, after payment (20g).
+ */
+export const MESSAGE_KINDS = ["delivery_fee", "coverage_request", "coverage_reply", "handoff_window"] as const;
+export type MessageKind = (typeof MESSAGE_KINDS)[number];
+
+export const MessageMetaSchema = z
+  .object({
+    feeKobo: z.number().int().nullable().optional(),
+    state: z.string().nullable().optional(),
+    /** coverage_request: pending until the seller answers; coverage_reply: accepted or declined. */
+    status: z.enum(["pending", "accepted", "declined"]).optional(),
+    window: z.string().nullable().optional(),
+  })
+  .openapi("MessageMeta");
+
 const ConversationMessageSchema = z
   .object({
     id: z.number().int(),
@@ -38,6 +58,8 @@ const ConversationMessageSchema = z
     dealId: z.string().uuid().nullable(),
     senderId: z.string().uuid(),
     body: z.string(),
+    kind: z.enum(MESSAGE_KINDS).nullable(),
+    meta: MessageMetaSchema.nullable(),
     createdAt: z.string(),
   })
   .openapi("ConversationMessage");
@@ -187,13 +209,24 @@ async function loadConversation(db: Sql, me: string, id: string): Promise<ConvRo
 
 // messages.id is bigint, which postgres.js returns as a string — Number() it at the
 // boundary so the wire matches the contract's integer.
-type MsgRow = { id: number | string; conversation_id: string; deal_id: string | null; sender_id: string; body: string; created_at: string | Date };
-const toMessage = (m: MsgRow) => ({
+export type MsgRow = {
+  id: number | string;
+  conversation_id: string;
+  deal_id: string | null;
+  sender_id: string;
+  body: string;
+  kind?: MessageKind | null;
+  meta?: Record<string, unknown> | null;
+  created_at: string | Date;
+};
+export const toMessage = (m: MsgRow) => ({
   id: Number(m.id),
   conversationId: m.conversation_id,
   dealId: m.deal_id,
   senderId: m.sender_id,
   body: m.body,
+  kind: m.kind ?? null,
+  meta: m.kind ? (m.meta as z.infer<typeof MessageMetaSchema>) ?? null : null,
   createdAt: iso(m.created_at),
 });
 
@@ -377,7 +410,7 @@ export function registerConversations(app: OpenAPIHono<AuthEnv>) {
       // The latest `limit` messages (after the cursor), returned oldest first.
       const rows = await db<MsgRow[]>`
         select * from (
-          select id, conversation_id, deal_id, sender_id, body, created_at
+          select id, conversation_id, deal_id, sender_id, body, kind, meta, created_at
           from public.messages
           where conversation_id = ${id} ${q.after != null ? db`and id > ${q.after}` : db``}
           order by id desc limit ${q.limit ?? 100}
@@ -426,7 +459,7 @@ export function registerConversations(app: OpenAPIHono<AuthEnv>) {
       const [m] = await db<MsgRow[]>`
         insert into public.messages (conversation_id, sender_id, body)
         values (${id}, ${user.sub}, ${body})
-        returning id, conversation_id, deal_id, sender_id, body, created_at
+        returning id, conversation_id, deal_id, sender_id, body, kind, meta, created_at
       `;
       // Sending implies you've read everything up to your own message.
       await markRead(db, id, user.sub, conv);
