@@ -3724,6 +3724,19 @@
               "null"
             ]
           },
+          "deliveryMethod": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deliveryFeeKobo": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
           "createdAt": {
             "type": "string"
           }
@@ -3737,6 +3750,8 @@
           "priceKobo",
           "qty",
           "reason",
+          "deliveryMethod",
+          "deliveryFeeKobo",
           "createdAt"
         ]
       },
@@ -3772,6 +3787,15 @@
               "decline",
               "withdraw",
               "cancel"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "price_too_low",
+              "item_sold",
+              "delivery_terms",
+              "other"
             ]
           },
           "priceKobo": {

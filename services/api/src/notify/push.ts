@@ -37,6 +37,13 @@ export function clip(s: string, n: number): string {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
 
+/** 20h-decline reasons as the buyer reads them (same phrasings as the app). */
+const DECLINE_WHY: Record<string, string> = {
+  price_too_low: " — the price is too low",
+  item_sold: " — it's already sold",
+  delivery_terms: " — they can't meet the delivery terms",
+};
+
 type DealCtx = {
   id: string;
   buyer_id: string;
@@ -64,8 +71,8 @@ async function forDeal(db: Sql, msg: NotifyMsg): Promise<Note[]> {
   if (!d) return [];
   const seq = Number(msg.seq ?? 1);
   // The event, not the deal row: by the time the poke arrives the deal may have moved on.
-  const [ev] = await db<{ action: string; actor: string; price_kobo: string | null; to_state: string }[]>`
-    select action, actor, price_kobo::text as price_kobo, to_state from public.deal_events
+  const [ev] = await db<{ action: string; actor: string; price_kobo: string | null; to_state: string; reason: string | null }[]>`
+    select action, actor, price_kobo::text as price_kobo, to_state, reason from public.deal_events
     where deal_id = ${d.id} and seq = ${seq}`;
   if (!ev) return [];
 
@@ -104,7 +111,7 @@ async function forDeal(db: Sql, msg: NotifyMsg): Promise<Note[]> {
       else to("buyer", "Offer accepted — pay to secure it", `${seller} accepted ${price} for ${title}. Pay into escrow to lock it in.`);
       break;
     case "decline":
-      to("buyer", "Offer declined", `${seller} declined your offer for ${title}.`);
+      to("buyer", "Offer declined", `${seller} declined your offer for ${title}${DECLINE_WHY[ev.reason ?? ""] ?? ""}.${ev.reason === "item_sold" ? "" : " You can send a new one."}`);
       break;
     case "cancel":
       to("buyer", "Deal cancelled", `${seller} cancelled the deal for ${title} before payment.`);

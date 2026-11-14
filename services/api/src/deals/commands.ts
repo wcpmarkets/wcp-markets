@@ -234,8 +234,10 @@ export async function createOffer(
     `;
     await sql`
       insert into public.deal_events
-        (deal_id, seq, actor, actor_id, action, from_state, to_state, price_kobo, qty, idempotency_key)
-      values (${deal!.id}, 1, 'BUYER', ${p.buyerId}, 'offer', null, 'OFFERED', ${p.priceKobo}, ${p.qty}, ${p.idempotencyKey ?? null})
+        (deal_id, seq, actor, actor_id, action, from_state, to_state, price_kobo, qty, idempotency_key,
+         delivery_method, delivery_fee_kobo)
+      values (${deal!.id}, 1, 'BUYER', ${p.buyerId}, 'offer', null, 'OFFERED', ${p.priceKobo}, ${p.qty}, ${p.idempotencyKey ?? null},
+              ${delivery?.method ?? null}, ${delivery?.feeKobo ?? null})
     `;
     await syncDeadline(sql, deal!.id, "OFFERED", deal!.state_token);
     await sql`
@@ -524,9 +526,11 @@ export async function transition(
 
     await sql`
       insert into public.deal_events
-        (deal_id, seq, actor, actor_id, action, requested_action, from_state, to_state, price_kobo, qty, reason, idempotency_key)
+        (deal_id, seq, actor, actor_id, action, requested_action, from_state, to_state, price_kobo, qty, reason, idempotency_key,
+         delivery_method, delivery_fee_kobo)
       values (${p.dealId}, ${next_seq}, ${p.actor}, ${p.actorId ?? null}, ${action}, ${p.action},
-              ${deal.state}, ${to}, ${p.priceKobo ?? null}, ${p.qty ?? null}, ${p.reason ?? null}, ${p.idempotencyKey ?? null})
+              ${deal.state}, ${to}, ${p.priceKobo ?? null}, ${p.qty ?? null}, ${p.reason ?? null}, ${p.idempotencyKey ?? null},
+              ${updated[0]!.delivery?.method ?? null}, ${updated[0]!.delivery?.feeKobo ?? null})
     `;
     await syncDeadline(sql, p.dealId, to, newToken, updated[0]!.terms);
     await sql`

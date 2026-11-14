@@ -8502,6 +8502,9 @@ export interface components {
             priceKobo: number | null;
             qty: number | null;
             reason: string | null;
+            deliveryMethod: string | null;
+            /** Format: int64 */
+            deliveryFeeKobo: number | null;
             createdAt: string;
         };
         DealDetail: components["schemas"]["Deal"] & {
@@ -8510,6 +8513,8 @@ export interface components {
         DealAction: {
             /** @enum {string} */
             action: "counter" | "accept" | "decline" | "withdraw" | "cancel";
+            /** @enum {string} */
+            reason?: "price_too_low" | "item_sold" | "delivery_terms" | "other";
             /** Format: int64 */
             priceKobo?: number;
             qty?: number;

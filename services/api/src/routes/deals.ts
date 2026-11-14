@@ -143,7 +143,11 @@ const DealEventSchema = z
     toState: z.string(),
     priceKobo: z.number().int().nullable(),
     qty: z.number().int().nullable(),
+    /** On a decline: one of DECLINE_REASONS (20h-decline). Otherwise a system note or null. */
     reason: z.string().nullable(),
+    /** How the item changes hands, and the pinned fee, as they stood after this event (0042). */
+    deliveryMethod: z.string().nullable(),
+    deliveryFeeKobo: z.number().int().nullable(),
     createdAt: z.string(),
   })
   .openapi("DealEvent");
@@ -185,9 +189,14 @@ const PayRequestSchema = z
   })
   .openapi("PayRequest");
 
+/** Canned decline reasons (20h-decline) — canned so the buyer only ever sees these phrasings. */
+export const DECLINE_REASONS = ["price_too_low", "item_sold", "delivery_terms", "other"] as const;
+
 const DealActionSchema = z
   .object({
     action: z.enum(["counter", "accept", "decline", "withdraw", "cancel"]),
+    /** Decline only: why, shown to the other party. A free-text note goes in chat instead. */
+    reason: z.enum(DECLINE_REASONS).optional(),
     priceKobo: z.number().int().nonnegative().optional(),
     qty: z.number().int().positive().optional(),
     /**
@@ -429,10 +438,12 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
           price_kobo: string | number | null;
           qty: number | null;
           reason: string | null;
+          delivery_method: string | null;
+          delivery_fee_kobo: string | number | null;
           created_at: string | Date;
         }[]
       >`
-        select seq, actor, action, from_state, to_state, price_kobo, qty, reason, created_at
+        select seq, actor, action, from_state, to_state, price_kobo, qty, reason, delivery_method, delivery_fee_kobo, created_at
         from public.deal_events where deal_id = ${id} order by seq
       `;
       return c.json(
@@ -447,6 +458,8 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
             priceKobo: e.price_kobo == null ? null : Number(e.price_kobo),
             qty: e.qty,
             reason: e.reason,
+            deliveryMethod: e.delivery_method,
+            deliveryFeeKobo: e.delivery_fee_kobo == null ? null : Number(e.delivery_fee_kobo),
             createdAt: iso(e.created_at),
           })),
         },
@@ -495,6 +508,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         return c.json({ error: "not_found" }, 404);
       if (b.action === "counter" && b.priceKobo == null)
         return c.json({ error: "counter_requires_price" }, 400);
+      if (b.reason && b.action !== "decline") return c.json({ error: "reason_only_on_decline" }, 400);
 
       // A counter may change how the item changes hands (goods only). A new method or
       // destination drops the pinned fee — it was quoted for the old one.
@@ -537,6 +551,7 @@ export function registerDeals(app: OpenAPIHono<AuthEnv>) {
         qty: b.qty,
         terms,
         delivery,
+        reason: b.action === "decline" ? b.reason : undefined,
         idempotencyKey: idem(c),
       });
       if (!r.ok) {
