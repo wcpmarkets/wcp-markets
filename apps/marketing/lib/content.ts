@@ -57,7 +57,7 @@ export type LaneCard = {
 
 export const lanes: LaneCard[] = [
   {
-    tag: "GOODS",
+    tag: "ITEMS",
     accent: colors.laneGoods,
     tagBg: "rgba(34,211,238,.14)",
     title: "Buy with escrow",

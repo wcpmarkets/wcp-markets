@@ -91,7 +91,7 @@ export default async function OpengraphImage() {
               marginTop: 28,
             }}
           >
-            Escrow-backed marketplace for goods, property, vehicles &amp;
+            Escrow-backed marketplace for items, property, vehicles &amp;
             services.
           </div>
         </div>
