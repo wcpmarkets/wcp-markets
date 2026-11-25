@@ -22,7 +22,7 @@ export const hero = {
   statusPill: "Trust & Opportunities · launching soon",
   headingLine1: "Buy and sell anything.",
   headingLine2: "Money held safe.",
-  sub: "WCP Markets is a marketplace for goods, property, vehicles and services — where every naira sits in escrow until you confirm the deal. Describe what you want in your own words; the AI finds it, and your money stays locked until you're sure.",
+  sub: "WCP Markets is a marketplace for items, property, vehicles and services — where every naira sits in escrow until you confirm the deal. Describe what you want in your own words; the AI finds it, and your money stays locked until you're sure.",
   chips: [
     { icon: "🔒", label: "Escrow on every deal" },
     { icon: "✓", label: "Verified sellers" },
@@ -156,7 +156,7 @@ export const trust = [
 export const faqs = [
   {
     q: "What is WCP Markets?",
-    a: "WCP Markets is a Nigerian marketplace for goods, property, vehicles and services. Anyone can list anything — but the deal closes safely inside the app: your payment is held in escrow by WCP Markets and only released to the seller when you confirm.",
+    a: "WCP Markets is a Nigerian marketplace for items, property, vehicles and services. Anyone can list anything — but the deal closes safely inside the app: your payment is held in escrow by WCP Markets and only released to the seller when you confirm.",
   },
   {
     q: "How is buying on WCP Markets safer?",

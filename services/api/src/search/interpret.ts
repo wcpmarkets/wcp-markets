@@ -293,7 +293,7 @@ export async function interpretPhoto(
   ]);
   if (!reading || !reading.lane) return null;
   const out = finish({ ...fromReading(reading), tossUp: false }, "ai", reading.itemName);
-  const laneName = { goods: "Goods", property: "Property", vehicles: "Vehicles", services: "Services" }[out.lane!];
+  const laneName = { goods: "Items", property: "Property", vehicles: "Vehicles", services: "Services" }[out.lane!];
   out.summary = out.itemName ? `Matched from your photo — **${out.itemName}**, ${laneName} lane` : out.summary;
   return out;
 }

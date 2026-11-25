@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://www.wcpmarkets.com"),
   title: "WCP Markets — Buy and sell anything. Money held safe.",
   description:
-    "WCP Markets is a marketplace for goods, property, vehicles and services — where every naira sits in escrow until you confirm the deal. Join the waitlist.",
+    "WCP Markets is a marketplace for items, property, vehicles and services — where every naira sits in escrow until you confirm the deal. Join the waitlist.",
   applicationName: "WCP Markets",
   keywords: [
     "WCP Markets",
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "WCP Markets — Buy and sell anything. Money held safe.",
     description:
-      "A Nigerian marketplace for goods, property, vehicles and services — every naira held safe in escrow until you confirm.",
+      "A Nigerian marketplace for items, property, vehicles and services — every naira held safe in escrow until you confirm.",
     siteName: "WCP Markets",
     locale: "en_NG",
     type: "website",
