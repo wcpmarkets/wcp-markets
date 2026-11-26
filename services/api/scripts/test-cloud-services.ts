@@ -209,6 +209,8 @@ async function main() {
     await sql`delete from public.ledger_entries where deal_id in (${deals})`;
     await sql`delete from public.outbox where deal_id in (${deals})`;
     await sql`delete from public.payouts where deal_id in (${deals})`.catch(() => {});
+    // Withdrawals left with no lines (0043) are this test's; they would block deleting its users.
+    await sql`delete from public.withdrawals w where not exists (select 1 from public.payouts p where p.withdrawal_id = w.id)`.catch(() => {});
     await sql`delete from public.deals where seller_id = ${pro.id}`;
     await sql`delete from public.listings where seller_id = ${pro.id}`;
     await sql.end({ timeout: 5 });

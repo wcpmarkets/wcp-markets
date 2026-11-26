@@ -10,6 +10,7 @@ import { completeDueRecoveries } from "./recovery/service.js";
 import { expireStaleCheckouts } from "./money/checkout.js";
 import { paystackConfigured } from "./money/paystack.js";
 import { settleStaleAttempts } from "./kyc/attempts.js";
+import { pollPendingWithdrawals } from "./money/withdrawals.js";
 
 /**
  * The sweeper Lambda — invoked every 60s by EventBridge. Fires due deal deadlines
@@ -96,6 +97,16 @@ export const handler = async () => {
     console.error("[sweeper] settleStaleAttempts failed:", e);
   }
 
+  // Paystack withdrawals pending past their grace: ask Paystack, so a lost webhook
+  // can't leave a seller's money in limbo (money/withdrawals.ts).
+  let wd = 0;
+  try {
+    if (await paystackConfigured()) wd = await pollPendingWithdrawals(db);
+  } catch (e) {
+    // Before migration 0043 the table doesn't exist; not worth failing the run over.
+    console.warn("[sweeper] withdrawal poll skipped:", e instanceof Error ? e.message : e);
+  }
+
   // AI search cache (3I): readings are only served for 7 days; keep a little past that.
   try {
     await db`delete from public.search_interpretations where created_at < now() - interval '14 days'`;
@@ -105,7 +116,7 @@ export const handler = async () => {
   }
 
   console.log(
-    `[sweeper] kyc checked=${kyc}; checkouts confirmed=${checkouts.confirmed} abandoned=${checkouts.abandoned}; recoveries completed=${recov.completed} failed=${recov.failed}; deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
+    `[sweeper] kyc checked=${kyc}; withdrawals polled=${wd}; checkouts confirmed=${checkouts.confirmed} abandoned=${checkouts.abandoned}; recoveries completed=${recov.completed} failed=${recov.failed}; deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
       `skipped=${timers?.skipped ?? "?"} errored=${timers?.errored ?? "?"}; ` +
       `outbox relayed=${relay.relayed} failed=${relay.failed}; reconcile ${recon}`,
   );

@@ -145,7 +145,12 @@ async function main() {
     let owed = 0;
     for (let i = 0; i < 24 && owed !== PAYOUT; i++) { await sleep(5_000); owed = await sumAcct(dealId, "seller_payable"); }
     check("release settles internally → seller owed", owed === PAYOUT, `${owed}`);
-    await fetch(`${API}/kyc/verify`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ idType: "bvn", idNumber: "22345678901" }) });
+    const kv = await fetch(`${API}/kyc/verify`, { method: "POST", headers: H(seller.token), body: JSON.stringify({ idType: "bvn", idNumber: "22345678901" }) });
+    if (kv.status === 409) {
+      await sql`insert into public.profiles (id, verification_level) values (${seller.id}, 2) on conflict (id) do update set verification_level = 2`;
+      await sql`insert into public.kyc_verifications (user_id, id_type, matched, level, id_hash) values (${seller.id}, 'nin', true, 2, 'test-hash')
+                on conflict (user_id) do update set level = 2, id_hash = 'test-hash'`;
+    }
     const np = await fetch(`${API}/deals/${dealId}/payout`, { method: "POST", headers: H(seller.token) });
     const npe = (await np.json()) as { error?: string };
     check("payout without an account → 409 no_payout_account", np.status === 409 && npe.error === "no_payout_account", `${np.status} ${npe.error}`);
@@ -192,6 +197,8 @@ async function main() {
   } finally {
     const deals = sql`select id from public.deals where seller_id = ${seller.id}`;
     await sql`delete from public.payouts where seller_id = ${seller.id}`;
+    // Withdrawals left with no lines (0043) are this test's; they would block deleting its users.
+    await sql`delete from public.withdrawals w where not exists (select 1 from public.payouts p where p.withdrawal_id = w.id)`.catch(() => {});
     await sql`delete from public.payment_refunds where deal_id in (${deals})`;
     await sql`delete from public.payments where deal_id in (${deals})`;
     await sql`delete from public.reconciliation_exceptions where deal_id in (${deals})`;

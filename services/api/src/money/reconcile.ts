@@ -30,6 +30,7 @@ export type ReconResult = {
   disputesOverdue: StuckDispute[];
   payoutsOverdue: string[]; // payout deal ids stuck 'pending'
   negativePayable: string[]; // deal ids with seller_payable < 0 (double-payout tripwire)
+  withdrawalsUnbooked: string[]; // settled withdrawals whose ledger payouts don't sum to their amount
   stagesOverdue: { dealId: string; idx: number }[]; // stage releases / deposit returns never settled
 };
 
@@ -92,6 +93,17 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     select deal_id from public.ledger_entries where account = 'seller_payable'
     group by deal_id having sum(amount_kobo) < 0
   `;
+  // (9) A settled withdrawal must have booked exactly its amount out of seller_payable
+  // across its lines (last 7 days — older ones were checked when they were fresh).
+  // Before migration 0043 there's no table: treat as none.
+  const unbooked = await db<{ id: string }[]>`
+    select w.id from public.withdrawals w
+    where w.status = 'settled' and w.settled_at > now() - interval '7 days'
+      and w.amount_kobo <> coalesce((
+        select -sum(le.amount_kobo) from public.ledger_entries le
+        where le.account = 'seller_payable' and le.movement = 'payout' and le.provider_ref = w.provider_ref
+          and le.deal_id in (select deal_id from public.payouts p where p.withdrawal_id = w.id)), 0)
+  `.catch(() => [] as { id: string }[]);
   return {
     globalBalanceKobo: Number(g!.total),
     driftDeals: drift.map((r) => ({ dealId: r.deal_id, escrowKobo: Number(r.esc), principalKobo: Number(r.principal), state: r.state })),
@@ -101,6 +113,7 @@ export async function reconcile(db: Sql): Promise<ReconResult> {
     payoutsOverdue: payoutsStuck.map((r) => r.deal_id),
     negativePayable: negPayable.map((r) => r.deal_id),
     stagesOverdue: stagesStuck.map((r) => ({ dealId: r.deal_id, idx: r.idx })),
+    withdrawalsUnbooked: unbooked.map((r) => r.id),
   };
 }
 
@@ -119,7 +132,8 @@ export async function reconcileAndRecord(db: Sql): Promise<ReconResult> {
     r.disputesOverdue.length > 0 ||
     r.payoutsOverdue.length > 0 ||
     r.negativePayable.length > 0 ||
-    r.stagesOverdue.length > 0;
+    r.stagesOverdue.length > 0 ||
+    r.withdrawalsUnbooked.length > 0;
   if (!bad) return r;
 
   console.error(
@@ -155,6 +169,8 @@ export async function reconcileAndRecord(db: Sql): Promise<ReconResult> {
   for (const st of r.stagesOverdue.slice(0, 50)) {
     await record(st.dealId, "stage_release_overdue", `stage ${st.idx} 'releasing' >${SETTLEMENT_GRACE_MINS}m — provider unpaid`);
   }
+  if (r.withdrawalsUnbooked.length)
+    await record(null, "withdrawal_unbooked", `settled but ledger payouts don't match: ${r.withdrawalsUnbooked.slice(0, 10).join(", ")}`);
   if (r.globalBalanceKobo !== 0) await record(null, "ledger_global_imbalance", `total=${r.globalBalanceKobo}`);
   if (r.parkedOutbox > 0) await record(null, "outbox_parked", `count=${r.parkedOutbox} (attempts>=${OUTBOX_MAX_ATTEMPTS})`);
 

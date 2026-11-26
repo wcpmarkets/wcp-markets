@@ -3,6 +3,7 @@ import type { Sql } from "../deals/commands.js";
 import { settlePayout, settleRefund, settleStageReturn } from "./ledger.js";
 import { applyPaystackCharge } from "./checkout.js";
 import { createRefund, initiateTransfer, PaystackError, type PaystackTxn } from "./paystack.js";
+import { applyTransferState } from "./withdrawals.js";
 
 /**
  * Paystack's side of the money spine (Phase 3 H):
@@ -156,6 +157,21 @@ export async function handlePaystackEvent(db: Sql, ev: Event): Promise<void> {
     case "transfer.failed":
     case "transfer.reversed": {
       const reference = d.reference as string;
+      // A withdrawal (0043) — including every payout from before it, backfilled as a
+      // one-line withdrawal with the same reference.
+      const [wd] = await db<{ id: string }[]>`select id from public.withdrawals where transfer_reference = ${reference}`;
+      if (wd) {
+        const status = ev.event === "transfer.success" ? "success" : ev.event === "transfer.reversed" ? "reversed" : "failed";
+        return applyTransferState(db, wd.id, {
+          status,
+          amount: Number(d.amount),
+          reference,
+          transfer_code: d.transfer_code != null ? String(d.transfer_code) : undefined,
+          fee_charged: d.fee_charged != null ? Number(d.fee_charged) : undefined,
+          reason: typeof d.reason === "string" ? d.reason : undefined,
+        }, ev.event);
+      }
+      // A per-deal payout made by the old route between the migration and the deploy.
       const [po] = await db<{ deal_id: string; part: number; amount_kobo: string; status: string }[]>`
         select deal_id, part, amount_kobo, status from public.payouts where transfer_reference = ${reference}`;
       if (!po) return exception(db, null, ev.event, "unknown_transfer", { reference });

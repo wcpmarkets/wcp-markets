@@ -83,3 +83,19 @@ export const processingFeeKobo = (net: number): number => {
   // flat kicks in; the others cover that, so `best` is always finite.
   return best - net;
 };
+
+/**
+ * Withdrawals (pooled payouts). The seller pays the bank-transfer fee: it's taken
+ * from what's sent, never added to what leaves their balance. Tiered on the amount
+ * withdrawn (gross), mirroring Paystack's NGN transfer pricing as recorded on
+ * 2026-11-26 — ₦10 up to ₦5,000, ₦25 up to ₦50,000, ₦50 above. Paystack tiers on the
+ * amount it sends (net), so at a tier edge we can charge one tier above what Paystack
+ * does; the provider's actual fee is stored beside the quote to reconcile. Change
+ * these if Paystack's pricing changes — the quote is always computed server-side.
+ */
+export const transferFeeKobo = (grossKobo: number): number =>
+  grossKobo <= 500_000 ? 1_000 : grossKobo <= 5_000_000 ? 2_500 : 5_000;
+
+/** ₦1,000. A smaller withdrawal is allowed only when it empties the balance (and is
+ * more than its fee), so a seller can always clear what they're owed. */
+export const MIN_WITHDRAWAL_KOBO = 100_000;

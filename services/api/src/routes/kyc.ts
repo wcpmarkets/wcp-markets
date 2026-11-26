@@ -7,6 +7,8 @@ import { getKycProvider } from "../kyc/provider.js";
 import { createSignedUploadUrl, deleteStorageObject } from "../supabase.js";
 import { hasPepper, idHash } from "../kyc/idhash.js";
 import { payoutsPausedByRecovery } from "../recovery/service.js";
+import { createWithdrawals } from "../money/withdrawals.js";
+import { kickOutbox } from "../deals/sqs-relay.js";
 import { getSmileId, SmileId } from "../kyc/smileid.js";
 import { type Attempt, refreshAttempt, settleAttempt } from "../kyc/attempts.js";
 
@@ -82,7 +84,7 @@ const PayoutSchema = z
     dealId: z.string().uuid(),
     sellerId: z.string().uuid(),
     amountKobo: z.number().int(),
-    status: z.enum(["pending", "settled", "failed"]),
+    status: z.enum(["pending", "settled", "failed", "reversed"]),
     createdAt: z.string(),
     settledAt: z.string().nullable(),
   })
@@ -392,81 +394,24 @@ export function registerKyc(app: OpenAPIHono<AuthEnv>) {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
       const { id } = c.req.valid("param");
-      const [deal] = await db<{ seller_id: string; state: string }[]>`select seller_id, state from public.deals where id = ${id}`;
+      const [deal] = await db<{ seller_id: string }[]>`select seller_id from public.deals where id = ${id}`;
       if (!deal || deal.seller_id !== user.sub) return c.json({ error: "not_found" }, 404);
-      // A staged job pays the provider as stages release (22c-quotebuild: "Get paid in
-      // stages as work is done"), so its released money is withdrawable mid-job. Never
-      // during a dispute — that freezes the job's money until it's resolved.
-      const [staged] = await db`select 1 from public.deal_milestones where deal_id = ${id} limit 1`;
-      const payable = deal.state === "COMPLETED" || (!!staged && ["PAID_IN_ESCROW", "HANDED_OFF", "CANCELLED"].includes(deal.state));
-      if (!payable) return c.json({ error: "not_payable" }, 409);
-
-      // The gate: no payout until the seller is L2-verified.
-      const [prof] = await db<{ verification_level: number }[]>`select verification_level from public.profiles where id = ${user.sub}`;
-      if ((prof?.verification_level ?? 1) < 2) return c.json({ error: "kyc_required" }, 403);
-      // Verified before ID hashes were kept: one re-verify, so a lost number can be
-      // recovered by ID rather than by an admin. Only once a pepper exists to hash with.
-      const [kh] = await db<{ id_hash: string | null }[]>`select id_hash from public.kyc_verifications where user_id = ${user.sub}`;
-      if (!kh?.id_hash && (await hasPepper())) return c.json({ error: "kyc_reverify" }, 403);
-      // An account mid-recovery: whoever ends up holding it gets the money, not now.
-      if (await payoutsPausedByRecovery(db, user.sub)) return c.json({ error: "recovery_hold" }, 409);
-      // Real money needs a real destination (3H): a Paystack deal pays to a saved account.
-      const [rail] = await db<{ payment_provider: string | null }[]>`select payment_provider from public.deals where id = ${id}`;
-      if (rail?.payment_provider === "paystack") {
-        const [acct] = await db<{ provider: string }[]>`select provider from public.payout_accounts where user_id = ${user.sub}`;
-        if (acct?.provider !== "paystack") return c.json({ error: "no_payout_account" }, 409);
+      // Withdrawing one sale is a one-line withdrawal (money/withdrawals.ts): same gates,
+      // same locks and balance checks, one transfer, and the seller pays its fee. Kept
+      // for app builds from before POST /me/withdrawals and for the money test suites.
+      const r = await createWithdrawals(db, { sellerId: user.sub, dealIds: [id], idempotencyKey: idem(c) ?? `deal:${id}:${randomUUID()}` });
+      if (!r.ok) {
+        if (r.status === 403) return c.json({ error: r.error }, 403);
+        // The old route's names: a sale that isn't withdrawable is not_payable; one on
+        // its way (or any withdrawal in flight) is already_requested.
+        const error = r.error === "withdrawal_pending" ? "already_requested" : r.error === "nothing_to_withdraw" ? "not_payable" : r.error;
+        return c.json({ error }, 409);
       }
-
-      const [bal] = await db<{ s: string }[]>`
-        select coalesce(sum(amount_kobo), 0)::bigint as s from public.ledger_entries
-        where deal_id = ${id} and account = 'seller_payable'
-      `;
-      const amount = Number(bal!.s);
-      if (amount <= 0) return c.json({ error: "nothing_to_pay_out" }, 409);
-
-      let out: PayoutRow | null;
-      try {
-        out = await db.begin(async (sql) => {
-          // One payout per deal, or (staged) one per request — never two in flight.
-          const prior = await sql<{ part: number; status: string }[]>`
-            select part, status from public.payouts where deal_id = ${id} order by part for update
-          `;
-          if (prior.some((p) => p.status === "pending")) return null;
-          // A transfer that failed (bad account, bank down): try that payout again,
-          // to the account as it is now, under a fresh transfer reference.
-          const failed = prior.find((p) => p.status === "failed");
-          if (failed) {
-            const [po] = await sql<PayoutRow[]>`
-              update public.payouts set status = 'pending', amount_kobo = ${amount}, transfer_reference = null
-              where deal_id = ${id} and part = ${failed.part}
-              returning id, deal_id, seller_id, amount_kobo, status, created_at, settled_at
-            `;
-            await sql`
-              insert into public.outbox (topic, payload, deal_id)
-              values ('escrow.payout', ${sql.json({ dealId: id, amount, sellerId: user.sub, part: failed.part })}, ${id})
-            `;
-            return po!;
-          }
-          if (prior.length && !staged) return null;
-          const part = prior.length;
-          const [po] = await sql<PayoutRow[]>`
-            insert into public.payouts (deal_id, seller_id, amount_kobo, part)
-            values (${id}, ${user.sub}, ${amount}, ${part})
-            returning id, deal_id, seller_id, amount_kobo, status, created_at, settled_at
-          `;
-          await sql`
-            insert into public.outbox (topic, payload, deal_id)
-            values ('escrow.payout', ${sql.json({ dealId: id, amount, sellerId: user.sub, part })}, ${id})
-          `;
-          return po!;
-        });
-      } catch (e) {
-        // Concurrent request lost the unique(deal_id) race → clean 409, not a 500.
-        if ((e as { code?: string }).code === "23505") return c.json({ error: "already_requested" }, 409);
-        throw e;
-      }
+      await kickOutbox(db);
+      const [out] = await db<PayoutRow[]>`
+        select id, deal_id, seller_id, amount_kobo, status, created_at, settled_at from public.payouts
+        where deal_id = ${id} and withdrawal_id = any(${r.withdrawals.map((w) => w.id)}::uuid[])`;
       if (!out) return c.json({ error: "already_requested" }, 409);
-      void idem(c);
       return c.json(toPayout(out), 201);
     },
   );

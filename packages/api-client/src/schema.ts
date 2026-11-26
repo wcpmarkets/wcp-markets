@@ -5693,6 +5693,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/withdrawals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw released money: everything available, or chosen whole sales (one transfer, one fee) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["WithdrawRequest"];
+                };
+            };
+            responses: {
+                /** @description Replay: the withdrawal this key already made */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WithdrawalsResult"];
+                    };
+                };
+                /** @description Withdrawal made and on its way */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WithdrawalsResult"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description kyc_required (L2) / kyc_reverify */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description nothing_to_withdraw / below_minimum / not_payable / already_requested / withdrawal_pending / no_payout_account / recovery_hold / balance_changed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Database unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/banks": {
         parameters: {
             query?: never;
@@ -8832,7 +8915,7 @@ export interface components {
             /** Format: int64 */
             amountKobo: number;
             /** @enum {string} */
-            status: "pending" | "settled" | "failed";
+            status: "pending" | "settled" | "failed" | "reversed";
             createdAt: string;
             settledAt: string | null;
         };
@@ -8843,6 +8926,9 @@ export interface components {
             /** Format: int64 */
             amountKobo: number;
             releasedAt: string;
+            /** Format: int64 */
+            feeKobo: number;
+            canWithdrawAlone: boolean;
         };
         PayoutHistoryItem: {
             /** Format: uuid */
@@ -8853,10 +8939,45 @@ export interface components {
             /** Format: int64 */
             amountKobo: number;
             /** @enum {string} */
-            status: "pending" | "settled" | "failed";
+            status: "pending" | "settled" | "failed" | "reversed";
             part: number;
             createdAt: string;
             settledAt: string | null;
+        };
+        WithdrawalQuote: {
+            /** Format: int64 */
+            grossKobo: number;
+            /** Format: int64 */
+            feeKobo: number;
+            /** Format: int64 */
+            netKobo: number;
+            allowed: boolean;
+            /** @enum {string|null} */
+            reason: "nothing_to_withdraw" | "below_minimum" | null;
+        };
+        WithdrawalLine: {
+            /** Format: uuid */
+            dealId: string;
+            title: string;
+            /** Format: int64 */
+            amountKobo: number;
+        };
+        Withdrawal: {
+            /** Format: uuid */
+            id: string;
+            /** Format: int64 */
+            amountKobo: number;
+            /** Format: int64 */
+            feeKobo: number;
+            /** Format: int64 */
+            netKobo: number;
+            /** @enum {string} */
+            status: "pending" | "settled" | "failed" | "reversed";
+            bankName: string | null;
+            accountLast4: string | null;
+            createdAt: string;
+            settledAt: string | null;
+            lines: components["schemas"]["WithdrawalLine"][];
         };
         Earnings: {
             /** Format: int64 */
@@ -8869,6 +8990,17 @@ export interface components {
             paidOutKobo: number;
             ready: components["schemas"]["PayoutReady"][];
             payouts: components["schemas"]["PayoutHistoryItem"][];
+            withdrawAll: components["schemas"]["WithdrawalQuote"];
+            /** Format: int64 */
+            minWithdrawalKobo: number;
+            withdrawals: components["schemas"]["Withdrawal"][];
+        };
+        WithdrawalsResult: {
+            withdrawals: components["schemas"]["Withdrawal"][];
+        };
+        WithdrawRequest: {
+            dealIds?: string[];
+            idempotencyKey: string;
         };
         Bank: {
             code: string;

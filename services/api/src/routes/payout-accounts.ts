@@ -4,6 +4,10 @@ import { rateLimit } from "../middleware/rate-limit.js";
 import { getDb } from "../db.js";
 import { railFor } from "../money/checkout.js";
 import { createRecipient, listBanks, PaystackError, resolveAccount } from "../money/paystack.js";
+import { createWithdrawals, quote, readyDeals, type WithdrawalRow } from "../money/withdrawals.js";
+import { MIN_WITHDRAWAL_KOBO, transferFeeKobo } from "../money/fees.js";
+import type { Sql } from "../deals/commands.js";
+import { kickOutbox } from "../deals/sqs-relay.js";
 
 /**
  * Where a seller's payouts go (20m-payout, Phase 3 H). The bank resolves the account
@@ -60,7 +64,10 @@ async function resolveOn(rail: "mock" | "paystack", accountNumber: string, bankC
   try {
     return (await resolveAccount(accountNumber, bankCode)).account_name;
   } catch (e) {
-    if (e instanceof PaystackError && e.status >= 400 && e.status < 500) return null; // no such account
+    // Only Paystack's "could not resolve" answers mean there's no such account. A 429
+    // (rate limit — test mode allows 3 real-bank lookups a day), 401 or outage is "couldn't
+    // check", which the routes report as 502, never as the seller mistyping the number.
+    if (e instanceof PaystackError && [400, 404, 422].includes(e.status)) return null;
     throw e;
   }
 }
@@ -72,7 +79,7 @@ const PayoutHistoryItemSchema = z
     dealId: z.string().uuid(),
     title: z.string(),
     amountKobo: z.number().int(),
-    status: z.enum(["pending", "settled", "failed"]),
+    status: z.enum(["pending", "settled", "failed", "reversed"]),
     /** 0 for a whole deal; 0, 1, … for a staged job withdrawn in parts. */
     part: z.number().int(),
     createdAt: z.string(),
@@ -80,8 +87,81 @@ const PayoutHistoryItemSchema = z
   })
   .openapi("PayoutHistoryItem");
 const PayoutReadySchema = z
-  .object({ dealId: z.string().uuid(), title: z.string(), amountKobo: z.number().int(), releasedAt: z.string() })
+  .object({
+    dealId: z.string().uuid(),
+    title: z.string(),
+    amountKobo: z.number().int(),
+    releasedAt: z.string(),
+    /** The transfer fee if this sale is withdrawn on its own (the seller pays it). */
+    feeKobo: z.number().int(),
+    /** False when withdrawing just this sale is under the minimum and doesn't empty the balance. */
+    canWithdrawAlone: z.boolean(),
+  })
   .openapi("PayoutReady");
+
+// ── Withdrawals (0043): one transfer, one fee, one or more whole sales ─────────
+const WithdrawalQuoteSchema = z
+  .object({
+    /** Leaves the seller's balance. */
+    grossKobo: z.number().int(),
+    /** The bank-transfer fee, taken from what's sent. */
+    feeKobo: z.number().int(),
+    /** Reaches the bank. */
+    netKobo: z.number().int(),
+    allowed: z.boolean(),
+    reason: z.enum(["nothing_to_withdraw", "below_minimum"]).nullable(),
+  })
+  .openapi("WithdrawalQuote");
+const WithdrawalLineSchema = z
+  .object({ dealId: z.string().uuid(), title: z.string(), amountKobo: z.number().int() })
+  .openapi("WithdrawalLine");
+const WithdrawalSchema = z
+  .object({
+    id: z.string().uuid(),
+    amountKobo: z.number().int(),
+    feeKobo: z.number().int(),
+    netKobo: z.number().int(),
+    status: z.enum(["pending", "settled", "failed", "reversed"]),
+    bankName: z.string().nullable(),
+    accountLast4: z.string().nullable(),
+    createdAt: z.string(),
+    settledAt: z.string().nullable(),
+    lines: z.array(WithdrawalLineSchema),
+  })
+  .openapi("Withdrawal");
+const WithdrawalsResultSchema = z.object({ withdrawals: z.array(WithdrawalSchema) }).openapi("WithdrawalsResult");
+const WithdrawRequestSchema = z
+  .object({
+    /** The sales to withdraw; omit for everything available. Whole sales only. */
+    dealIds: z.array(z.string().uuid()).min(1).max(100).optional(),
+    /** The same key again (a retried tap) returns the withdrawal it already made. */
+    idempotencyKey: z.string().min(8).max(100),
+  })
+  .openapi("WithdrawRequest");
+
+/** Withdrawals with their lines, newest first. */
+async function withdrawalsOf(db: Sql, rows: WithdrawalRow[]): Promise<z.infer<typeof WithdrawalSchema>[]> {
+  if (!rows.length) return [];
+  const lines = await db<{ withdrawal_id: string; deal_id: string; title: string | null; amount_kobo: string }[]>`
+    select p.withdrawal_id, p.deal_id, l.title, p.amount_kobo
+    from public.payouts p join public.deals d on d.id = p.deal_id
+    left join public.listings l on l.id = d.listing_id
+    where p.withdrawal_id = any(${rows.map((r) => r.id)}::uuid[])
+    order by p.created_at`;
+  return rows.map((w) => ({
+    id: w.id,
+    amountKobo: Number(w.amount_kobo),
+    feeKobo: Number(w.fee_kobo),
+    netKobo: Number(w.net_kobo),
+    status: w.status as "pending" | "settled" | "failed" | "reversed",
+    bankName: w.bank_name,
+    accountLast4: w.account_last4,
+    createdAt: iso(w.created_at),
+    settledAt: w.settled_at ? iso(w.settled_at) : null,
+    lines: lines.filter((l) => l.withdrawal_id === w.id)
+      .map((l) => ({ dealId: l.deal_id, title: l.title ?? "Listing removed", amountKobo: Number(l.amount_kobo) })),
+  }));
+}
 const EarningsSchema = z
   .object({
     /** Released to the seller, not yet withdrawn or on its way. */
@@ -90,10 +170,17 @@ const EarningsSchema = z
     processingKobo: z.number().int(),
     /** Held in escrow for open deals, before the seller fee. */
     inEscrowKobo: z.number().int(),
-    /** Ever paid out to the bank. */
+    /** Ever reached the seller's bank: settled withdrawals, after transfer fees. */
     paidOutKobo: z.number().int(),
     ready: z.array(PayoutReadySchema),
+    /** Per-sale payout lines (kept for older app builds; new ones read withdrawals). */
     payouts: z.array(PayoutHistoryItemSchema),
+    /** Withdrawing everything available now, in one go. */
+    withdrawAll: WithdrawalQuoteSchema,
+    /** ₦1,000 — waived when a withdrawal empties the balance. */
+    minWithdrawalKobo: z.number().int(),
+    /** Withdrawals, newest first, each with the sales it paid out. */
+    withdrawals: z.array(WithdrawalSchema),
   })
   .openapi("Earnings");
 
@@ -161,25 +248,31 @@ export function registerPayoutAccounts(app: OpenAPIHono<AuthEnv>) {
       ]);
 
       const title = (t: string | null) => t ?? "Listing removed";
-      let availableKobo = 0;
       let processingKobo = 0;
       let inEscrowKobo = 0;
-      const ready: z.infer<typeof PayoutReadySchema>[] = [];
       for (const d of deals) {
-        const payable = Number(d.payable);
-        const pending = Number(d.pending);
-        processingKobo += pending;
+        processingKobo += Number(d.pending);
         inEscrowKobo += Math.max(0, Number(d.held));
-        const free = payable - pending;
-        // A pending payout is withdrawn already; only a deal with none in flight can be
-        // withdrawn again (one payout in flight per deal — routes/kyc.ts).
-        if (free > 0 && pending === 0) {
-          availableKobo += free;
-          ready.push({ dealId: d.deal_id, title: title(d.title), amountKobo: free, releasedAt: iso(d.released_at ?? new Date()) });
-        }
       }
-      ready.sort((a, b) => b.releasedAt.localeCompare(a.releasedAt));
-      const paidOutKobo = payouts.filter((p) => p.status === "settled").reduce((a, p) => a + Number(p.amount_kobo), 0);
+      // What can be withdrawn is the withdrawal code's own answer (money/withdrawals.ts),
+      // so the screen and POST /me/withdrawals can't disagree.
+      const readyNow = await readyDeals(db, uid);
+      const availableKobo = readyNow.reduce((a, d) => a + d.amountKobo, 0);
+      const ready = readyNow
+        .map((d) => {
+          const q = quote([d], availableKobo);
+          return { dealId: d.dealId, title: d.title, amountKobo: d.amountKobo, releasedAt: iso(d.releasedAt), feeKobo: transferFeeKobo(d.amountKobo), canWithdrawAlone: q.allowed };
+        })
+        .sort((a, b) => b.releasedAt.localeCompare(a.releasedAt));
+      const all = quote(readyNow, availableKobo);
+      const wrows = await db<WithdrawalRow[]>`
+        select id, seller_id, amount_kobo, fee_kobo, net_kobo, status, rail, bank_name, account_last4, created_at, settled_at
+        from public.withdrawals where seller_id = ${uid} order by created_at desc limit 50`;
+      // What actually reached the bank (net of the transfer fee), over all time — not
+      // just the history rows above, which are capped.
+      const [paid] = await db<{ s: string }[]>`
+        select coalesce(sum(net_kobo), 0)::bigint as s from public.withdrawals where seller_id = ${uid} and status = 'settled'`;
+      const paidOutKobo = Number(paid!.s);
       return c.json(
         {
           availableKobo,
@@ -187,6 +280,9 @@ export function registerPayoutAccounts(app: OpenAPIHono<AuthEnv>) {
           inEscrowKobo,
           paidOutKobo,
           ready,
+          withdrawAll: { grossKobo: all.grossKobo, feeKobo: all.feeKobo, netKobo: all.netKobo, allowed: all.allowed, reason: all.reason },
+          minWithdrawalKobo: MIN_WITHDRAWAL_KOBO,
+          withdrawals: await withdrawalsOf(db, wrows),
           payouts: payouts.map((p) => ({
             id: p.id,
             dealId: p.deal_id,
@@ -200,6 +296,41 @@ export function registerPayoutAccounts(app: OpenAPIHono<AuthEnv>) {
         },
         200,
       );
+    },
+  );
+
+  // ── POST /me/withdrawals — withdraw everything, or the sales picked ──────────
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/me/withdrawals",
+      summary: "Withdraw released money: everything available, or chosen whole sales (one transfer, one fee)",
+      tags: ["payouts"],
+      security: [{ bearerAuth: [] }],
+      middleware: [auth] as const,
+      request: { body: { content: { "application/json": { schema: WithdrawRequestSchema } } } },
+      responses: {
+        200: { description: "Replay: the withdrawal this key already made", content: { "application/json": { schema: WithdrawalsResultSchema } } },
+        201: { description: "Withdrawal made and on its way", content: { "application/json": { schema: WithdrawalsResultSchema } } },
+        401: { description: "Unauthorized" },
+        403: { description: "kyc_required (L2) / kyc_reverify", content: { "application/json": { schema: ErrorSchema } } },
+        409: {
+          description: "nothing_to_withdraw / below_minimum / not_payable / already_requested / withdrawal_pending / no_payout_account / recovery_hold / balance_changed",
+          content: { "application/json": { schema: ErrorSchema } },
+        },
+        503: { description: "Database unavailable", content: { "application/json": { schema: ErrorSchema } } },
+      },
+    }),
+    async (c) => {
+      const uid = c.get("user").sub;
+      const db = await getDb();
+      if (!db) return c.json({ error: "db_unavailable" }, 503);
+      const b = c.req.valid("json");
+      const r = await createWithdrawals(db, { sellerId: uid, dealIds: b.dealIds, idempotencyKey: b.idempotencyKey });
+      if (!r.ok) return r.status === 403 ? c.json({ error: r.error }, 403) : c.json({ error: r.error }, 409);
+      // Send it now rather than on the sweeper's next minute (best effort).
+      if (!r.replay) await kickOutbox(db);
+      return c.json({ withdrawals: await withdrawalsOf(db, r.withdrawals) }, r.replay ? 200 : 201);
     },
   );
 

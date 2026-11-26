@@ -6,7 +6,8 @@ import { fetchSsm } from "../src/secrets.js";
 /**
  * Removes everything scripts/seed-my-store.ts made, and nothing else: the seeded
  * listings (with their photos), the test buyers' deals and reviews and every row hung
- * off them, the notifications they caused, and the @wcp-seed.local accounts.
+ * off them, the withdrawals scripts/seed-my-payouts.ts made (idempotency key seed:*),
+ * the notifications they caused, and the @wcp-seed.local accounts.
  * The seeded seller's own account and anything they made themselves is untouched.
  *
  *   npx tsx scripts/cleanup-my-store-seed.ts            # dry run: counts only
@@ -49,6 +50,14 @@ async function main() {
     for (const t of ["ledger_entries", "payments", "payment_refunds", "payouts", "deal_milestones", "dispute_cases", "bookings", "outbox"]) {
       const r = await sql`delete from ${sql("public." + t)} where deal_id = any(${deals}::uuid[]) returning 1`.catch((e) => { throw new Error(`${t}: ${e.message}`); });
       if (r.length) console.log(`   ${t}: ${r.length}`);
+    }
+    // seed-my-payouts.ts: its withdrawals (their lines went with the deals' payouts above).
+    if (seed?.seller) {
+      const w = await sql`delete from public.withdrawals where seller_id = ${seed.seller} and idempotency_key like 'seed:%' returning 1`;
+      if (w.length) console.log(`   withdrawals: ${w.length}`);
+      // A payout account seeded without a real Paystack recipient (seed_rcp_*); a real one is kept.
+      const pa = await sql`delete from public.payout_accounts where user_id = ${seed.seller} and recipient_code like 'seed_rcp_%' returning 1`;
+      if (pa.length) console.log(`   seeded payout account: ${pa.length}`);
     }
     if (seed?.seller) {
       const n = await sql`

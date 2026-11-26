@@ -129,6 +129,14 @@ export function initiateTransfer(p: { amountKobo: number; recipientCode: string;
   });
 }
 
+/** A transfer as Paystack has it now. Statuses include pending, otp, received,
+ * success, failed, reversed, abandoned; fee_charged is present on newer responses. */
+export type PaystackTransferStatus = { reference: string; status: string; amount: number; transfer_code?: string; fee_charged?: number; reason?: string };
+/** Look a transfer up by our reference. 404 (PaystackError) = Paystack never made it. */
+export function verifyTransfer(reference: string): Promise<PaystackTransferStatus> {
+  return call<PaystackTransferStatus>("GET", `/transfer/verify/${encodeURIComponent(reference)}`);
+}
+
 // ── Webhooks ──────────────────────────────────────────────────────────────────
 /** Paystack signs the raw body: HMAC-SHA512 with the secret key, hex, in x-paystack-signature. */
 export async function verifyPaystackSignature(raw: string, signature: string | undefined): Promise<boolean> {

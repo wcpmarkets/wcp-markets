@@ -2,6 +2,7 @@ import { MockEscrowProvider } from "@wcp/escrow";
 import { fetchSsm } from "./secrets.js";
 import { getDb } from "./db.js";
 import { dealRail, refundLatePayment, requestRefund, requestTransfer } from "./money/paystack-ops.js";
+import { processWithdrawal } from "./money/withdrawals.js";
 import { handleNotifyEvent, NOTIFY_TOPICS } from "./notify/push.js";
 import { handleListingPriced, WATCH_TOPICS } from "./notify/watch.js";
 
@@ -54,6 +55,11 @@ export const handler = async (event: SqsEvent) => {
       // Paystack deals (3H): refunds and payouts are real Paystack calls, settled by
       // Paystack's own webhooks. Releases stay internal (the money never leaves WCP's
       // balance), so they take the self-webhook path below like the mock.
+      // A pooled withdrawal (0043): one transfer for one or more sales, either rail.
+      if (msg.topic === "escrow.withdrawal") {
+        await processWithdrawal(await needDb(), (msg as unknown as { withdrawalId: string }).withdrawalId);
+        continue;
+      }
       if (msg.topic === "paystack.refund_late") {
         await refundLatePayment(await needDb(), { dealId: msg.dealId, reference: msg.reference!, amountKobo: msg.amount! });
         continue;

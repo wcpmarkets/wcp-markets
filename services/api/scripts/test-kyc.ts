@@ -107,6 +107,8 @@ async function main() {
     check("reconcile flags negative seller_payable (double-payout tripwire)", (await reconcile(sql)).negativePayable.includes(d2));
   } finally {
     await sql`delete from public.payouts where seller_id = ${seller}`;
+    // Withdrawals left with no lines (0043) are this test's; they would block deleting its users.
+    await sql`delete from public.withdrawals w where not exists (select 1 from public.payouts p where p.withdrawal_id = w.id)`.catch(() => {});
     await sql`delete from public.ledger_entries where deal_id in (select id from public.deals where seller_id = ${seller})`;
     await sql`delete from public.outbox where deal_id in (select id from public.deals where seller_id = ${seller})`;
     await sql`delete from public.kyc_verifications where user_id = ${seller}`;

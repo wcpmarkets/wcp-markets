@@ -4901,7 +4901,8 @@
             "enum": [
               "pending",
               "settled",
-              "failed"
+              "failed",
+              "reversed"
             ]
           },
           "createdAt": {
@@ -4940,13 +4941,22 @@
           },
           "releasedAt": {
             "type": "string"
+          },
+          "feeKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "canWithdrawAlone": {
+            "type": "boolean"
           }
         },
         "required": [
           "dealId",
           "title",
           "amountKobo",
-          "releasedAt"
+          "releasedAt",
+          "feeKobo",
+          "canWithdrawAlone"
         ]
       },
       "PayoutHistoryItem": {
@@ -4972,7 +4982,8 @@
             "enum": [
               "pending",
               "settled",
-              "failed"
+              "failed",
+              "reversed"
             ]
           },
           "part": {
@@ -4997,6 +5008,133 @@
           "part",
           "createdAt",
           "settledAt"
+        ]
+      },
+      "WithdrawalQuote": {
+        "type": "object",
+        "properties": {
+          "grossKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "feeKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "netKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "allowed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "nothing_to_withdraw",
+              "below_minimum"
+            ]
+          }
+        },
+        "required": [
+          "grossKobo",
+          "feeKobo",
+          "netKobo",
+          "allowed",
+          "reason"
+        ]
+      },
+      "WithdrawalLine": {
+        "type": "object",
+        "properties": {
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "amountKobo": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "dealId",
+          "title",
+          "amountKobo"
+        ]
+      },
+      "Withdrawal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amountKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "feeKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "netKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "settled",
+              "failed",
+              "reversed"
+            ]
+          },
+          "bankName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "accountLast4": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "settledAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WithdrawalLine"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "amountKobo",
+          "feeKobo",
+          "netKobo",
+          "status",
+          "bankName",
+          "accountLast4",
+          "createdAt",
+          "settledAt",
+          "lines"
         ]
       },
       "Earnings": {
@@ -5029,6 +5167,19 @@
             "items": {
               "$ref": "#/components/schemas/PayoutHistoryItem"
             }
+          },
+          "withdrawAll": {
+            "$ref": "#/components/schemas/WithdrawalQuote"
+          },
+          "minWithdrawalKobo": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "withdrawals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Withdrawal"
+            }
           }
         },
         "required": [
@@ -5037,7 +5188,46 @@
           "inEscrowKobo",
           "paidOutKobo",
           "ready",
-          "payouts"
+          "payouts",
+          "withdrawAll",
+          "minWithdrawalKobo",
+          "withdrawals"
+        ]
+      },
+      "WithdrawalsResult": {
+        "type": "object",
+        "properties": {
+          "withdrawals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Withdrawal"
+            }
+          }
+        },
+        "required": [
+          "withdrawals"
+        ]
+      },
+      "WithdrawRequest": {
+        "type": "object",
+        "properties": {
+          "dealIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 100
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "idempotencyKey"
         ]
       },
       "Bank": {
@@ -11902,6 +12092,83 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/withdrawals": {
+      "post": {
+        "summary": "Withdraw released money: everything available, or chosen whole sales (one transfer, one fee)",
+        "tags": [
+          "payouts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WithdrawRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replay: the withdrawal this key already made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalsResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Withdrawal made and on its way",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalsResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "kyc_required (L2) / kyc_reverify",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "nothing_to_withdraw / below_minimum / not_payable / already_requested / withdrawal_pending / no_payout_account / recovery_hold / balance_changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "503": {
             "description": "Database unavailable",
