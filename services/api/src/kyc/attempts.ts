@@ -1,6 +1,7 @@
 import type { Sql } from "postgres";
 import { deleteStorageObject } from "../supabase.js";
-import type { SmileId, SmileStatus } from "./smileid.js";
+import { deliver } from "../notify/push.js";
+import { getSmileId, type SmileId, type SmileStatus } from "./smileid.js";
 
 /**
  * Smile ID attempts (0035): one per capture. An attempt is settled from the job's
@@ -29,11 +30,13 @@ export async function settleAttempt(db: Sql, a: Attempt, status: SmileStatus, re
     return;
   }
   let oldSelfie: string | null = null;
+  let settled = false;
   await db.begin(async (sql) => {
     const [won] = await sql`
       update public.kyc_attempts set status = ${status}, reason = ${reason}, updated_at = now(), completed_at = now()
       where id = ${a.id} and status in ('started', 'processing') returning id`;
     if (!won) return; // someone else settled it first
+    settled = true;
     const [old] = await sql<{ selfie_path: string | null; matched: boolean }[]>`
       select selfie_path, matched from public.kyc_verifications where user_id = ${a.user_id} for update`;
     if (status === "clear") {
@@ -59,6 +62,58 @@ export async function settleAttempt(db: Sql, a: Attempt, status: SmileStatus, re
   });
   // The mock-era selfie is superseded — Smile ID holds the capture now (NDPA minimisation).
   if (oldSelfie) await deleteStorageObject("kyc-selfies", oldSelfie);
+  // Only the call that settled it tells the person, so a webhook racing a poll can't
+  // notify twice (deliver's dedupe key would stop it anyway).
+  if (settled) await notifyResult(db, a, status);
+}
+
+/**
+ * Tell the person how their check came out (push + the in-app list). Results usually
+ * land in under a minute while they're watching Verify your identity — the app drops
+ * the push then, as it does for the chat that's open — but a slow one can take far
+ * longer, and they shouldn't have to keep reopening the screen to find out.
+ */
+const RESULT: Partial<Record<SmileStatus, { title: string; body: string }>> = {
+  clear: { title: "You're verified", body: "Your ID check passed — payouts are unlocked." },
+  attention: {
+    title: "Your ID check needs another try",
+    body: "I couldn't confirm it automatically. Try again in good, even light with your face fully in the frame.",
+  },
+  block: {
+    title: "Your ID check didn't match",
+    body: "Check the number, and that your names are exactly as on your BVN/NIN, then try again.",
+  },
+  error: { title: "Your ID check didn't finish", body: "I couldn't reach the ID service to finish it. Try again." },
+};
+
+async function notifyResult(db: Sql, a: Attempt, status: SmileStatus): Promise<void> {
+  const text = RESULT[status];
+  if (!text) return;
+  try {
+    // A payout is what this unlocks, so it goes out on the Orders & escrow channel.
+    await deliver(db, { userId: a.user_id, topic: "orders", ...text, key: `kyc:${a.id}`, data: { type: "kyc" }, tag: "kyc" });
+  } catch (e) {
+    console.error(`[kyc] notify ${a.id}:`, (e as Error).message); // best-effort, like every push
+  }
+}
+
+/**
+ * The sweeper's job: settle checks still processing with nobody asking. The webhook
+ * and the app's polling cover the usual case; this covers a missed webhook with the
+ * app closed, which is when the result notification matters most. Each attempt is
+ * asked about at most once a minute (settling 'processing' bumps updated_at), and
+ * given up on after 3 days.
+ */
+export async function settleStaleAttempts(db: Sql): Promise<number> {
+  const smile = await getSmileId();
+  if (!smile) return 0;
+  const rows = await db<Attempt[]>`
+    select id, user_id, id_type, id_hash, job_id, status, updated_at from public.kyc_attempts
+    where status = 'processing' and job_id is not null
+      and updated_at < now() - interval '1 minute' and created_at > now() - interval '3 days'
+    order by updated_at limit 10`;
+  for (const a of rows) await refreshAttempt(db, smile, a);
+  return rows.length;
 }
 
 /** Ask Smile ID where a submitted attempt stands, and settle it. Never throws. */

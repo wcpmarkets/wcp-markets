@@ -9,6 +9,7 @@ import { reconcileAndRecord } from "./money/reconcile.js";
 import { completeDueRecoveries } from "./recovery/service.js";
 import { expireStaleCheckouts } from "./money/checkout.js";
 import { paystackConfigured } from "./money/paystack.js";
+import { settleStaleAttempts } from "./kyc/attempts.js";
 
 /**
  * The sweeper Lambda — invoked every 60s by EventBridge. Fires due deal deadlines
@@ -85,6 +86,16 @@ export const handler = async () => {
     console.error("[sweeper] expireStaleCheckouts failed:", e);
   }
 
+  // Smile ID checks still processing with the app closed and no webhook: settle them
+  // here so the person is notified of the result (kyc/attempts.ts).
+  let kyc = 0;
+  try {
+    kyc = await settleStaleAttempts(db);
+  } catch (e) {
+    errors.push(e);
+    console.error("[sweeper] settleStaleAttempts failed:", e);
+  }
+
   // AI search cache (3I): readings are only served for 7 days; keep a little past that.
   try {
     await db`delete from public.search_interpretations where created_at < now() - interval '14 days'`;
@@ -94,7 +105,7 @@ export const handler = async () => {
   }
 
   console.log(
-    `[sweeper] checkouts confirmed=${checkouts.confirmed} abandoned=${checkouts.abandoned}; recoveries completed=${recov.completed} failed=${recov.failed}; deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
+    `[sweeper] kyc checked=${kyc}; checkouts confirmed=${checkouts.confirmed} abandoned=${checkouts.abandoned}; recoveries completed=${recov.completed} failed=${recov.failed}; deadlines due=${timers?.due ?? "?"} fired=${timers?.fired ?? "?"} ` +
       `skipped=${timers?.skipped ?? "?"} errored=${timers?.errored ?? "?"}; ` +
       `outbox relayed=${relay.relayed} failed=${relay.failed}; reconcile ${recon}`,
   );

@@ -8940,6 +8940,7 @@ export interface components {
             dealId: string | null;
             /** Format: uuid */
             listingId: string | null;
+            type: string | null;
             read: boolean;
             createdAt: string;
         };

@@ -284,6 +284,11 @@ resource "aws_lambda_function" "sweeper" {
       # Phase 3 H. Paystack secret key (sk_test_… / sk_live_…). Until the parameter
       # exists every deal stays on the mock rail; creating it needs only a cold start.
       PAYSTACK_SECRET_KEY_SSM = "/wcp/api/paystack-secret-key"
+      # Settles Smile ID checks left processing (kyc/attempts.ts), so it must ask the
+      # same Smile ID environment as the API — keep in step with the API's SMILEID_ENV.
+      SMILEID_PARTNER_ID_SSM = "/wcp/api/smileid-partner-id"
+      SMILEID_API_KEY_SSM    = "/wcp/api/smileid-api-key"
+      SMILEID_ENV            = "sandbox"
     }
   }
 

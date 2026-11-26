@@ -23,6 +23,12 @@ const NotificationSchema = z
     dealId: z.string().uuid().nullable(),
     /** A price drop or a watch hit: opens the listing. */
     listingId: z.string().uuid().nullable(),
+    /**
+     * What it's about, as the push's data.type: conversation, deal, listing,
+     * listing_review, kyc. Lets a tap open a screen with no id (kyc → Verify your
+     * identity; listing_review with no listing → My listings). Null on older rows.
+     */
+    type: z.string().nullable(),
     read: z.boolean(),
     createdAt: z.string(),
   })
@@ -104,6 +110,7 @@ export function registerNotifications(app: OpenAPIHono<AuthEnv>) {
             conversationId: r.data?.conversationId ?? null,
             dealId: r.data?.dealId ?? null,
             listingId: r.data?.listingId ?? null,
+            type: r.data?.type ?? null,
             read: r.read_at != null,
             createdAt: new Date(r.created_at).toISOString(),
           })),
