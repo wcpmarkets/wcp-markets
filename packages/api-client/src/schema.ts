@@ -2896,6 +2896,7 @@ export interface paths {
                     nearLng?: number | null;
                     radiusKm?: number;
                     lane?: "goods" | "property" | "vehicles" | "services";
+                    sellerId?: string;
                     limit?: number;
                     cursor?: string;
                 };

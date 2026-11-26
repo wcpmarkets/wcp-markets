@@ -679,6 +679,8 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         query: z.object({
           ...LocationQuery,
           lane: z.enum(LANES).optional(),
+          /** One seller's active listings — the Listings tab on their store profile. */
+          sellerId: z.string().uuid().optional(),
           limit: z.coerce.number().int().min(1).max(50).optional(),
           cursor: z.string().datetime().optional(),
         }),
@@ -697,7 +699,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
     async (c) => {
       const db = await getDb();
       if (!db) return c.json({ error: "db_unavailable" }, 503);
-      const { limit, cursor, lane, ...loc } = c.req.valid("query");
+      const { limit, cursor, lane, sellerId, ...loc } = c.req.valid("query");
       const take = limit ?? 20;
       const place = locationWhere(db, loc);
 
@@ -705,6 +707,7 @@ export function registerListings(app: OpenAPIHono<AuthEnv>) {
         select ${db.unsafe(LISTING_SELECT)} from public.listings
         where status = 'active'
           ${lane ? db`and lane = ${lane}` : db``}
+          ${sellerId ? db`and seller_id = ${sellerId}` : db``}
           ${place ? db`and (${place})` : db``}
           ${cursor ? db`and created_at < ${cursor}` : db``}
         order by created_at desc

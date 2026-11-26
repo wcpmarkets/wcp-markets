@@ -8883,6 +8883,15 @@
           },
           {
             "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "sellerId",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 50

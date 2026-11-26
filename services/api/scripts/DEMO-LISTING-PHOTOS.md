@@ -28,3 +28,17 @@ Extra photos were added the same day so the card's swipe-through could be tested
 | iPhone 13 Pro — 128GB, Graphite (2 of 3) | [Apple iPhone 13 Pro on MacBook Pro 01.jpg](https://commons.wikimedia.org/wiki/File:Apple_iPhone_13_Pro_on_MacBook_Pro_01.jpg) | SimonWaldherr | CC BY-SA 4.0 |
 | iPhone 13 Pro — 128GB, Graphite (3 of 3) | [Apple iPhone 13 Pro on MacBook Pro 03.jpg](https://commons.wikimedia.org/wiki/File:Apple_iPhone_13_Pro_on_MacBook_Pro_03.jpg) | SimonWaldherr | CC BY-SA 4.0 |
 | 2-bed flat, Lekki Phase 1 (2 of 2) | [Cozy bedroom with suitcase….jpg](https://commons.wikimedia.org/wiki/File:Cozy_bedroom_with_suitcase_and_natural_light_from_the_window_in_a_modern_apartment_setting.jpg) | Shixart1985 | CC BY 2.0 |
+
+## Seeded store (scripts/seed-my-store.ts, 2026-11-26)
+
+The seed copies the photos above onto its own listings (iPhone, PS5, EliteBook, Samsung TV,
+Switch, and the flat's two photos for the Gwarinpa flat and the Wuse shortlet), so the same
+credits apply. It also fetched three new photos from Wikimedia Commons:
+
+| Listing | Source | Author | Licence |
+|---|---|---|---|
+| Toyota Camry XSE 2020 | [2020 Toyota Camry XSE front.jpg](https://commons.wikimedia.org/wiki/File:2020_Toyota_Camry_XSE_front.jpg) | Throwawayacc222 | CC0 (no credit required) |
+| Lexus RX 350 2016 | [2016 Lexus RX350, Front Left, 04-05-2021.jpg](https://commons.wikimedia.org/wiki/File:2016_Lexus_RX350,_Front_Left,_04-05-2021.jpg) | SsmIntrigue | CC BY-SA 4.0 |
+| Phone & laptop repairs — Gwarinpa | [Réparateur-dépanneur de téléphones mobiles 1.jpg](https://commons.wikimedia.org/wiki/File:R%C3%A9parateur-d%C3%A9panneur_de_t%C3%A9l%C3%A9phones_mobiles_1.jpg) | Karim Diarra | CC BY-SA 4.0 |
+
+`scripts/cleanup-my-store-seed.ts --apply` removes the seeded listings and their photo copies.
