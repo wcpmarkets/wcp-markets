@@ -11,7 +11,7 @@ import { fetchSsm } from "../secrets.js";
  *   TERMII_SENDER_ID  approved sender ID (default "WCPMarkets")
  *   TERMII_BASE_URL   default https://v3.api.termii.com
  */
-export type SmsKind = "recovery_started" | "recovery_cancelled" | "recovery_completed" | "recovery_review";
+export type SmsKind = "recovery_started" | "recovery_cancelled" | "recovery_completed" | "recovery_review" | "notification";
 
 export interface SmsSender {
   readonly name: "termii" | "mock";
@@ -54,7 +54,7 @@ let mockSince = 0;
 export function getSmsSender(): Promise<SmsSender> {
   if (sender && mockSince && Date.now() - mockSince > RECHECK_MS) sender = null;
   sender ??= (async () => {
-    const key = process.env.TERMII_API_KEY ?? (process.env.TERMII_API_KEY_SSM ? await fetchSsm(process.env.TERMII_API_KEY_SSM).catch(() => undefined) : undefined);
+    const key = process.env.TERMII_API_KEY ?? (await fetchSsm(process.env.TERMII_API_KEY_SSM ?? "/wcp/api/termii-api-key").catch(() => undefined));
     if (!key) {
       mockSince = Date.now();
       return new MockSms();
@@ -76,4 +76,23 @@ export async function sendSecuritySms(db: Sql, p: { to: string; kind: SmsKind; b
   `.catch((e) => console.error("[sms] log failed:", (e as Error).message));
   if (!r.ok) console.error(`[sms] ${p.kind} failed: ${r.error}`);
   return r.ok;
+}
+
+/**
+ * One notification SMS (notify/push.ts deliver): logged like a security alert, tied to
+ * its notification row. Returns the outcome for notifications.sms_status. Never throws.
+ */
+export async function sendNotificationSms(
+  db: Sql,
+  p: { to: string; body: string; notificationId: number },
+): Promise<{ status: "sent" | "mocked" | "failed"; error?: string }> {
+  const s = await getSmsSender();
+  const r = await s.send(p.to, p.body);
+  const status = s.name === "mock" ? "mocked" : r.ok ? "sent" : "failed";
+  await db`
+    insert into public.sms_log (to_phone, kind, body, provider, provider_ref, status, error, notification_id)
+    values (${p.to}, 'notification', ${p.body}, ${s.name}, ${r.ref ?? null}, ${status}, ${r.error ?? null}, ${p.notificationId})
+  `.catch((e) => console.error("[sms] log failed:", (e as Error).message));
+  if (!r.ok) console.error(`[sms] notification failed: ${r.error}`);
+  return { status, error: r.error };
 }

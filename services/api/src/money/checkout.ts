@@ -63,16 +63,17 @@ export function callbackUrl(): string {
 /**
  * The email Paystack gets (it requires one, and keys customers by it — so it must be
  * unique per buyer): the account's confirmed email; else one given at checkout and not
- * yet confirmed; else a per-buyer plus-address on our support mailbox
- * (cx+u<id>@wcpmarkets.com), so receipts for phone-only buyers land with us, not a
- * stranger. Reserved endings (the clitest+ps-…@wcp-test.local accounts) fail Paystack's
+ * yet confirmed; else a per-buyer plus-address on our own domain
+ * (receipts+u<id>@wcpmarkets.com), so receipts for phone-only buyers never reach a
+ * stranger. Cloudflare Email Routing accepts receipts@ (subaddressing on) and drops it,
+ * so they neither bounce back to Paystack nor fill the support inbox. Reserved endings (the clitest+ps-…@wcp-test.local accounts) fail Paystack's
  * check, so they're skipped.
  */
 async function customerEmail(db: Sql, userId: string): Promise<string> {
   const { email, pendingEmail } = await emailsFor(db, userId);
   const [u] = await db<{ email: string | null }[]>`select nullif(email, '') as email from auth.users where id = ${userId}`;
   for (const e of [email, pendingEmail, u?.email]) if (e && !UNDELIVERABLE.test(e)) return e;
-  const [local, domain] = (process.env.PAYSTACK_PLACEHOLDER_MAILBOX ?? "cx@wcpmarkets.com").split("@");
+  const [local, domain] = (process.env.PAYSTACK_PLACEHOLDER_MAILBOX ?? "receipts@wcpmarkets.com").split("@");
   return `${local}+u${userId.replace(/-/g, "")}@${domain}`;
 }
 

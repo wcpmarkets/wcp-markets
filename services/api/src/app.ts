@@ -8,6 +8,7 @@ import { registerDisputes } from "./routes/disputes.js";
 import { registerReviews } from "./routes/reviews.js";
 import { registerKyc } from "./routes/kyc.js";
 import { registerWebhooks } from "./routes/webhooks.js";
+import { registerResendWebhook } from "./routes/resend-webhook.js";
 import { registerProfiles } from "./routes/profiles.js";
 import { registerConversations } from "./routes/conversations.js";
 import { registerReports } from "./routes/reports.js";
@@ -208,6 +209,7 @@ export function createApp() {
 
   // ── Escrow webhooks (M4) — raw signed endpoint, not in the client contract ──
   registerWebhooks(app);
+  registerResendWebhook(app);
 
   // Security scheme for the emitted spec.
   app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {

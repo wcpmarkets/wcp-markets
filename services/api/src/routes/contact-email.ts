@@ -4,7 +4,7 @@ import type { Sql } from "postgres";
 import { getDb } from "../db.js";
 import { auth, type AuthEnv } from "../middleware/auth.js";
 import { clientIp } from "../middleware/rate-limit.js";
-import { fetchSsm } from "../secrets.js";
+import { emailHtml, sendEmail } from "../notify/email.js";
 import { getServiceKey } from "../supabase.js";
 
 /**
@@ -49,43 +49,24 @@ export async function emailsFor(db: Sql, userId: string): Promise<{ email: strin
   return { email, pendingEmail };
 }
 
-/** Cached once found; while missing, looked up again at most every 5 minutes. */
-let resendKey: string | undefined;
-let resendMissingAt = 0;
-async function getResendKey(): Promise<string | undefined> {
-  if (resendKey) return resendKey;
-  if (Date.now() - resendMissingAt < 5 * 60_000) return undefined;
-  resendKey = process.env.RESEND_API_KEY ?? (process.env.RESEND_API_KEY_SSM ? await fetchSsm(process.env.RESEND_API_KEY_SSM) : undefined);
-  if (!resendKey) resendMissingAt = Date.now();
-  return resendKey;
-}
-
 async function sendVerifyEmail(to: string, link: string): Promise<boolean> {
-  const key = await getResendKey();
-  if (!key) {
-    console.warn("[contact-email] no Resend key — confirmation not sent");
-    return false;
-  }
-  const from = (process.env.RESEND_FROM ?? "WCP Markets <hello@wcpmarkets.com>").trim();
-  const text = `Confirm this email for your WCP Markets account:\n\n${link}\n\nWe'll send your payment receipts here. The link works for ${TOKEN_TTL_H} hours. If you didn't ask for this, ignore this email.`;
-  const html = `<div style="font-family:system-ui,sans-serif;max-width:480px;margin:auto;padding:24px;color:#0b0d12">
-<h2 style="margin:0 0 12px">Confirm your email</h2>
-<p>Tap below to confirm this email for your WCP Markets account. We'll send your payment receipts here.</p>
-<p style="margin:24px 0"><a href="${link}" style="background:#22d3ee;color:#0b0d12;padding:12px 20px;border-radius:999px;text-decoration:none;font-weight:700">Confirm email</a></p>
-<p style="color:#667;font-size:13px">The link works for ${TOKEN_TTL_H} hours. If you didn't ask for this, ignore this email.</p></div>`;
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to, subject: "Confirm your email for WCP Markets", text, html }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) console.error("[contact-email] resend", res.status, (await res.text()).slice(0, 200));
-    return res.ok;
-  } catch (e) {
-    console.error("[contact-email] send failed:", e instanceof Error ? e.message : e);
-    return false;
-  }
+  const r = await sendEmail({
+    to,
+    subject: "Confirm your email for WCP Markets",
+    text: `Confirm this email for your WCP Markets account:
+
+${link}
+
+We'll send your payment receipts here. The link works for ${TOKEN_TTL_H} hours. If you didn't ask for this, ignore this email.`,
+    html: emailHtml({
+      heading: "Confirm your email",
+      paragraphs: ["Tap below to confirm this email for your WCP Markets account. We'll send your payment receipts here."],
+      button: { label: "Confirm email", href: link },
+      footer: `The link works for ${TOKEN_TTL_H} hours. If you didn't ask for this, ignore this email.`,
+    }),
+  });
+  if (r.status === "mocked") console.warn("[contact-email] no Resend key — confirmation not sent");
+  return r.status === "sent";
 }
 
 /** Make `email` the account's confirmed email in Supabase Auth. */
@@ -170,8 +151,8 @@ export function registerContactEmail(app: OpenAPIHono<AuthEnv>) {
     if (!db) return page("Try again shortly", "We couldn't confirm your email just now. Please try the link again in a minute.", 500);
     const [row] = await db<{ user_id: string; email: string; expired: boolean }[]>`
       select user_id, email, token_expires_at < now() as expired from public.contact_emails where token_hash = ${sha256(t)}`;
-    if (!row) return page("Link already used", "This link has been used or replaced by a newer one. If your email isn't confirmed yet, add it again at checkout.", 400);
-    if (row.expired) return page("Link expired", "This link has expired. Add your email again at checkout to get a new one.", 400);
+    if (!row) return page("Link already used", "This link has been used or replaced by a newer one. If your email isn't confirmed yet, open WCP Markets → Account → Email to get a new link.", 400);
+    if (row.expired) return page("Link expired", "This link has expired. Open WCP Markets → Account → Email to get a new one.", 400);
 
     const r = await confirmOnAccount(row.user_id, row.email);
     if (r === "taken") return page("Email already in use", "That email is already on another WCP Markets account, so it can't be added to this one.", 409);

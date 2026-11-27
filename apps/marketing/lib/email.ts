@@ -6,7 +6,7 @@ import "server-only";
  * re-emailed. Requires RESEND_API_KEY and a verified sending domain (DKIM/SPF) for
  * RESEND_FROM. Without the key, this no-ops with a warning (dev).
  */
-const FROM = (process.env.RESEND_FROM ?? "WCP Markets <hello@wcpmarkets.com>").trim();
+const FROM = (process.env.RESEND_FROM ?? "WCP Markets <wcp@wcpmarkets.com>").trim();
 const SITE_URL = (process.env.SITE_URL ?? "https://www.wcpmarkets.com").trim().replace(/\/$/, "");
 
 export async function sendConfirmationEmail(p: { email: string; token: string }): Promise<boolean> {

@@ -1,10 +1,14 @@
 import type { Sql } from "postgres";
 import { getPushSender } from "./fcm.js";
+import { emailHtml, sendEmail } from "./email.js";
+import { emailsFor } from "../routes/contact-email.js";
+import { sendNotificationSms } from "../sms/provider.js";
 
 /**
- * Push notifications (FCM). The consumer calls handleNotifyEvent for the outbox topics
- * below; this decides who is told what, then delivers within the user's preferences
- * (/me notificationPrefs: channels.push and the topic switch).
+ * Notifications. The consumer calls handleNotifyEvent for the outbox topics below; this
+ * decides who is told what, then delivers within the user's preferences (/me
+ * notificationPrefs): push (FCM), email (Resend, confirmed address only, a chat at most
+ * hourly) and SMS (Termii, only `urgent` notes — each text costs money).
  *
  *   deal.created     { dealId, seq: 1, … }               an offer or a quote
  *   deal.transition  { dealId, seq, from, to, actor, action }
@@ -18,7 +22,8 @@ import { getPushSender } from "./fcm.js";
 export const NOTIFY_TOPICS = new Set(["deal.created", "deal.transition", "message.created"]);
 
 type Topic = "orders" | "messages" | "watch";
-export type Note = { userId: string; topic: Topic; title: string; body: string; key: string; data: Record<string, string>; tag?: string };
+/** `urgent`: also worth an SMS (each costs money) — someone has to act, or money moved. */
+export type Note = { userId: string; topic: Topic; title: string; body: string; key: string; data: Record<string, string>; tag?: string; urgent?: boolean };
 
 type NotifyMsg = { topic: string; dealId?: string; seq?: number; action?: string; actor?: string; to?: string; messageId?: number };
 
@@ -82,8 +87,9 @@ async function forDeal(db: Sql, msg: NotifyMsg): Promise<Note[]> {
   const seller = d.seller_name || "The seller";
   const data: Record<string, string> = { type: "deal", dealId: d.id, ...(d.conversation_id ? { conversationId: d.conversation_id } : {}) };
   const out: Note[] = [];
-  const to = (who: "buyer" | "seller", t: string, b: string) =>
+  const to = (who: "buyer" | "seller", t: string, b: string, urgent = false) =>
     out.push({
+      urgent,
       userId: who === "buyer" ? d.buyer_id : d.seller_id,
       topic: "orders",
       title: t,
@@ -108,7 +114,7 @@ async function forDeal(db: Sql, msg: NotifyMsg): Promise<Note[]> {
       break;
     case "accept":
       if (byBuyer) to("seller", "Price accepted", `${buyer} accepted ${price} for ${title}. They'll pay into escrow next.`);
-      else to("buyer", "Offer accepted — pay to secure it", `${seller} accepted ${price} for ${title}. Pay into escrow to lock it in.`);
+      else to("buyer", "Offer accepted — pay to secure it", `${seller} accepted ${price} for ${title}. Pay into escrow to lock it in.`, true);
       break;
     case "decline":
       to("buyer", "Offer declined", `${seller} declined your offer for ${title}${DECLINE_WHY[ev.reason ?? ""] ?? ""}.${ev.reason === "item_sold" ? "" : " You can send a new one."}`);
@@ -127,19 +133,19 @@ async function forDeal(db: Sql, msg: NotifyMsg): Promise<Note[]> {
     // ── Payment ──
     case "payment_confirmed":
       to("buyer", "Payment secured in escrow", `${price} for ${title} is held safely until you confirm.`);
-      if (d.booking) to("seller", "New booking paid", `${buyer} booked ${title}. The payment is in escrow.`);
-      else to("seller", "Paid — hand it over", `${buyer} paid ${price} into escrow for ${title}. Hand it off, then mark it handed off.`);
+      if (d.booking) to("seller", "New booking paid", `${buyer} booked ${title}. The payment is in escrow.`, true);
+      else to("seller", "Paid — hand it over", `${buyer} paid ${price} into escrow for ${title}. Hand it off, then mark it handed off.`, true);
       break;
     case "payment_failed":
       to("buyer", "Payment didn't go through", `Your payment for ${title} failed. You can try again from the deal.`);
       break;
     case "oversold":
-      to("buyer", "Sold out — refund on its way", `${title} sold out before your payment landed. You're being refunded.`);
+      to("buyer", "Sold out — refund on its way", `${title} sold out before your payment landed. You're being refunded.`, true);
       break;
 
     // ── Fulfilment ──
     case "hand_off":
-      to("buyer", "Marked as handed off", `${seller} marked ${title} handed off. Confirm you've got it to release payment.`);
+      to("buyer", "Marked as handed off", `${seller} marked ${title} handed off. Confirm you've got it to release payment.`, true);
       break;
     case "confirm_receipt":
       to("seller", "Payment released", `${buyer} confirmed receipt of ${title}. Your payment has been released.`);
@@ -154,19 +160,19 @@ async function forDeal(db: Sql, msg: NotifyMsg): Promise<Note[]> {
       to("seller", "Stay complete", `The stay at ${title} has ended and your payment has been released.`);
       break;
     case "cancel_refund":
-      to("buyer", "Deal cancelled — refund on its way", `${seller} couldn't complete ${title}. You're being refunded from escrow.`);
+      to("buyer", "Deal cancelled — refund on its way", `${seller} couldn't complete ${title}. You're being refunded from escrow.`, true);
       break;
     case "cancel_booking":
       to("seller", "Booking cancelled", `${buyer} cancelled their booking of ${title}.`);
       break;
     case "auto_refund":
-      to("buyer", "Refund on its way", `The deal for ${title} wasn't completed in time, so you're being refunded.`);
+      to("buyer", "Refund on its way", `The deal for ${title} wasn't completed in time, so you're being refunded.`, true);
       to("seller", "Deal refunded", `The deal for ${title} wasn't completed in time, so the buyer was refunded.`);
       break;
 
     // ── Disputes ──
     case "dispute":
-      to("seller", "Dispute opened — respond within 24h", `${buyer} opened a dispute on ${title}. Respond within 24 hours or the buyer is refunded.`);
+      to("seller", "Dispute opened — respond within 24h", `${buyer} opened a dispute on ${title}. Respond within 24 hours or the buyer is refunded.`, true);
       break;
     case "respond":
       to("buyer", "Seller responded", `${seller} responded to your dispute on ${title}. Our team will review it.`);
@@ -215,6 +221,8 @@ async function forMessage(db: Sql, messageId: number): Promise<Note[]> {
 
 const CHANNEL: Record<Topic, string> = { orders: "orders", messages: "messages", watch: "watch" };
 
+type Prefs = { channels?: { push?: boolean; email?: boolean; sms?: boolean }; topics?: Record<string, boolean> };
+
 export async function deliver(db: Sql, n: Note): Promise<void> {
   const [claimed] = await db<{ id: number }[]>`
     insert into public.notifications (user_id, dedupe_key, topic, title, body, data)
@@ -222,36 +230,44 @@ export async function deliver(db: Sql, n: Note): Promise<void> {
     on conflict (dedupe_key) do nothing
     returning id`;
   if (!claimed) return; // a redelivered poke: already handled
-  const done = (status: string, detail: string | null = null) =>
-    db`update public.notifications set status = ${status}, detail = ${detail} where id = ${claimed.id}`;
+  const id = claimed.id;
 
-  const [p] = await db<{ prefs: { channels?: { push?: boolean }; topics?: Record<string, boolean> } | null }[]>`
+  const [p] = await db<{ prefs: Prefs | null }[]>`
     select notification_prefs as prefs from public.profiles where id = ${n.userId}`;
-  // Defaults mirror 0022: push on, orders + messages on.
-  // A topic switched off: not wanted at all (also hidden from the in-app list, 20l).
-  if (p?.prefs?.topics?.[n.topic] === false) return void (await done("skipped", "topic_off"));
+  const skip = (detail: string) => db`update public.notifications set status = 'skipped', detail = ${detail} where id = ${id}`;
+  // A topic switched off: not wanted at all, on any channel (also hidden from 20l).
+  if (p?.prefs?.topics?.[n.topic] === false) return void (await skip("topic_off"));
 
   // Blocked senders don't get through, even if the message was sent before the block.
   if (n.topic === "messages") {
     const [blocked] = await db`
       select 1 from public.blocks b join public.messages m on m.id = ${Number(n.key.slice(4))}
       where (b.blocker_id = ${n.userId} and b.blocked_id = m.sender_id) limit 1`;
-    if (blocked) return void (await done("skipped", "blocked"));
+    if (blocked) return void (await skip("blocked"));
   }
-  // Push switched off: no buzz, but it still shows in the in-app list.
-  if (p?.prefs?.channels?.push === false) return void (await done("skipped", "push_off"));
+  // Defaults mirror 0022: push + SMS on, email off.
+  const ch = { push: true, email: false, sms: true, ...(p?.prefs?.channels ?? {}) };
 
+  // Each channel stands alone: one failing, or switched off, never stops the others.
+  // Push switched off: no buzz, but it still shows in the in-app list.
+  const push = ch.push ? await sendPush(db, n, id) : { status: "skipped", detail: "push_off" };
+  await db`update public.notifications set status = ${push.status}, detail = ${push.detail} where id = ${id}`;
+  if (ch.email) await emailNote(db, n, id);
+  if (ch.sms && n.urgent) await smsNote(db, n, id);
+}
+
+async function sendPush(db: Sql, n: Note, id: number): Promise<{ status: string; detail: string | null }> {
   const devices = await db<{ token: string }[]>`select token from public.push_devices where user_id = ${n.userId}`;
-  if (!devices.length) return void (await done("no_device"));
+  if (!devices.length) return { status: "no_device", detail: null };
 
   const sender = await getPushSender();
-  if (sender.name === "mock") return void (await done("mocked", `${devices.length} device(s)`));
+  if (sender.name === "mock") return { status: "mocked", detail: `${devices.length} device(s)` };
 
   let sent = 0;
   const errors: string[] = [];
   for (const d of devices) {
     // notificationId: a tap marks this row read in the app's list.
-    const data = { ...n.data, notificationId: String(claimed.id) };
+    const data = { ...n.data, notificationId: String(id) };
     const r = await sender.send({ token: d.token, title: n.title, body: n.body, data, tag: n.tag, channel: CHANNEL[n.topic] });
     if (r.ok) sent++;
     else {
@@ -259,5 +275,67 @@ export async function deliver(db: Sql, n: Note): Promise<void> {
       if (r.gone) await db`delete from public.push_devices where token = ${d.token}`;
     }
   }
-  await done(sent ? "sent" : "failed", errors.length ? errors.join(" | ").slice(0, 500) : `${sent} device(s)`);
+  return { status: sent ? "sent" : "failed", detail: errors.length ? errors.join(" | ").slice(0, 500) : `${sent} device(s)` };
+}
+
+/** Record a channel's outcome; a provider's error is appended to the row's detail. */
+async function setChannel(db: Sql, id: number, channel: "email" | "sms", status: string, error?: string) {
+  const note = error ? `${channel}: ${error}`.slice(0, 300) : null;
+  if (channel === "email")
+    await db`update public.notifications set email_status = ${status},
+               detail = case when ${note}::text is null then detail else concat_ws(' | ', detail, ${note}::text) end
+             where id = ${id}`;
+  else
+    await db`update public.notifications set sms_status = ${status},
+               detail = case when ${note}::text is null then detail else concat_ws(' | ', detail, ${note}::text) end
+             where id = ${id}`;
+}
+
+/** A chat is emailed at most once an hour: the first message says there's a conversation. */
+const CHAT_EMAIL_GAP = "1 hour";
+
+async function emailNote(db: Sql, n: Note, id: number): Promise<void> {
+  try {
+    const { email } = await emailsFor(db, n.userId); // confirmed addresses only
+    if (!email) return void (await setChannel(db, id, "email", "no_address"));
+    const chat = n.topic === "messages";
+    if (chat && n.data.conversationId) {
+      const [recent] = await db`
+        select 1 from public.notifications
+        where user_id = ${n.userId} and id <> ${id} and topic = 'messages'
+          and email_status in ('sent', 'mocked') and data->>'conversationId' = ${n.data.conversationId}
+          and created_at > now() - ${CHAT_EMAIL_GAP}::interval
+        limit 1`;
+      if (recent) return void (await setChannel(db, id, "email", "throttled"));
+    }
+    const lead = chat ? `${n.title} sent you a message on WCP Markets:` : null;
+    const body = chat ? `“${n.body}”` : n.body;
+    const footer =
+      "Open the WCP Markets app to reply or take action. You're getting this because email updates are on; turn them off in Account → Notifications.";
+    const r = await sendEmail({
+      to: email,
+      subject: chat ? `New message from ${n.title}` : n.title,
+      text: [lead, body, "", footer].filter((x) => x !== null).join("\n"),
+      html: emailHtml({ heading: chat ? "New message" : n.title, paragraphs: [lead, body].filter((x): x is string => !!x), footer }),
+    });
+    await setChannel(db, id, "email", r.status, r.error);
+  } catch (e) {
+    console.error("[notify] email:", (e as Error).message);
+  }
+}
+
+/** One SMS segment where possible (160 characters). */
+export function smsText(n: Pick<Note, "body">): string {
+  return clip(`WCP Markets: ${n.body}`, 160);
+}
+
+async function smsNote(db: Sql, n: Note, id: number): Promise<void> {
+  try {
+    const [u] = await db<{ phone: string | null }[]>`select nullif(phone, '') as phone from auth.users where id = ${n.userId}`;
+    if (!u?.phone) return void (await setChannel(db, id, "sms", "no_address"));
+    const r = await sendNotificationSms(db, { to: u.phone, body: smsText(n), notificationId: id });
+    await setChannel(db, id, "sms", r.status, r.error);
+  } catch (e) {
+    console.error("[notify] sms:", (e as Error).message);
+  }
 }

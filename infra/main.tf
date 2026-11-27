@@ -114,7 +114,7 @@ resource "aws_lambda_function" "api" {
       SEARCH_AI_DAILY_CAP   = "3000"
       # Receipt-email confirmations (send-only Resend key; sender domain verified in Resend).
       RESEND_API_KEY_SSM = "/wcp/api/resend-api-key"
-      RESEND_FROM        = "WCP Markets <hello@wcpmarkets.com>"
+      RESEND_FROM        = "WCP Markets <wcp@wcpmarkets.com>"
       # Phase 3 J. Smile ID Biometric KYC (selfie vs the BVN/NIN photo). Until both
       # parameters exist KYC stays on the mock match; creating them needs no redeploy.
       # SMILEID_ENV flips to "production" with production keys.
@@ -453,4 +453,47 @@ resource "aws_lambda_event_source_mapping" "consumer" {
   batch_size                         = 10
   maximum_batching_window_in_seconds = 0 # push notifications: deliver as soon as a message lands
   function_response_types            = ["ReportBatchItemFailures"]
+}
+
+# ── Email failures ──────────────────────────────────────────────────────────────
+# Every email the backend sends goes through notify/email.ts, which logs a refusal by
+# Resend (unverified domain, bad key, sending limit, outage) with the EMAIL_FAILED
+# marker; /webhooks/resend logs bounces, spam complaints, failures and long delays
+# with the same marker. One metric counts them across the three Lambdas, and the
+# alarm emails the alerts topic within ~5 minutes of the first one — through SNS, so
+# it still arrives when Resend itself is the thing that's broken.
+locals {
+  email_log_groups = {
+    api      = aws_cloudwatch_log_group.api.name
+    sweeper  = aws_cloudwatch_log_group.sweeper.name
+    consumer = aws_cloudwatch_log_group.consumer.name
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "email_failed" {
+  for_each       = local.email_log_groups
+  name           = "${local.name}-${each.key}-email-failed"
+  log_group_name = each.value
+  pattern        = "\"EMAIL_FAILED\""
+  metric_transformation {
+    name          = "EmailFailures"
+    namespace     = "WCP/Email"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "email_failures" {
+  alarm_name          = "${local.name}-email-failures"
+  namespace           = "WCP/Email"
+  metric_name         = "EmailFailures"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "Emails are failing (Resend refused a send, or reported a bounce/complaint/failure/delay). Search the Lambda logs for EMAIL_FAILED."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
 }
